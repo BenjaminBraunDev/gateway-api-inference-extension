@@ -115,3 +115,13 @@ func IsCritical(model *v1alpha1.InferenceModel) bool {
 	}
 	return false
 }
+
+func (s *K8sDatastore) GetInferenceModels() []v1alpha1.InferenceModel {
+	models := []v1alpha1.InferenceModel{}
+	visit := func(key, value any) bool {
+		models = append(models, *value.(*v1alpha1.InferenceModel))
+		return true
+	}
+	s.InferenceModels.Range(visit)
+	return models
+}
