@@ -128,6 +128,7 @@ func (p *Provider) refreshMetricsOnce(logger logr.Logger) error {
 		go func() {
 			defer wg.Done()
 			updated, err := p.pmc.FetchMetrics(ctx, existing, pool.Spec.TargetPortNumber)
+			//fmt.Printf("###### DEBUG Fetched Pod Metrics: %+v", updated)
 			if err != nil {
 				errCh <- fmt.Errorf("failed to parse metrics from %s: %v", existing.NamespacedName, err)
 				return
