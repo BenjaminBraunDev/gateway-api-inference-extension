@@ -42,7 +42,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/internal/runnable"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/vllm"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/triton"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	runserver "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/server"
@@ -150,7 +150,9 @@ func run() error {
 
 	// Setup runner.
 	datastore := datastore.NewDatastore()
-	provider := backend.NewProvider(&vllm.PodMetricsClientImpl{}, datastore)
+	// switch case across different model server metrics (triton, vllm)
+	provider := backend.NewProvider(&triton.PodMetricsClientImpl{}, datastore)
+	//
 	serverRunner := &runserver.ExtProcServerRunner{
 		GrpcPort:                                 *grpcPort,
 		DestinationEndpointHintMetadataNamespace: *destinationEndpointHintMetadataNamespace,
