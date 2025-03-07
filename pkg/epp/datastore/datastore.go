@@ -228,11 +228,9 @@ func (ds *datastore) ModelGetAll() []*v1alpha2.InferenceModel {
 
 // /// Pods/endpoints APIs ///
 func (ds *datastore) PodUpdateMetricsIfExist(namespacedName types.NamespacedName, m *Metrics) bool {
-	//fmt.Printf("###### DEBUG metrics to update pod with: %+v", *m)
 	if val, ok := ds.pods.Load(namespacedName); ok {
 		existing := val.(*PodMetrics)
 		existing.Metrics = *m
-		//fmt.Printf("###### DEBUG new pod metrics: %+v", existing.Metrics)
 		return true
 	}
 	return false
