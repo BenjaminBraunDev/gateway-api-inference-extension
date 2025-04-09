@@ -23,7 +23,7 @@ spec:
     spec:
       containers:
       - name: llama-builder
-        image: us-central1-docker.pkg.dev/benjaminbraun-gke-dev/triton-test/triton-trtllm-custom:25.02 # Use the base Triton image directly
+        image: nvcr.io/nvidia/tritonserver:25.03-trtllm-python-py3 # Base Triton image
         command: ["/bin/bash", "-c"]
         args:
           - |
@@ -39,7 +39,7 @@ spec:
             apt-get update && apt-get install -y --no-install-recommends git
 
             # Clone the tensorrt_llm_backend repository and set up submodule
-            git clone -b triton-llm/v0.17.0 https://github.com/triton-inference-server/tensorrtllm_backend.git /models/tensorrtllm_backend
+            git clone -b v0.18.1 https://github.com/triton-inference-server/tensorrtllm_backend.git /models/tensorrtllm_backend
             cd /models/tensorrtllm_backend
             git lfs install
             git submodule update --init --recursive
@@ -76,7 +76,7 @@ spec:
                           --remove_input_padding enable \
                           --max_batch_size 64
 
-            cp /models/tensorrtllm_backend/all_models/inflight_batcher_llm/ ${TRTLLM_MODEL_REPO} -r
+            cp -a /models/tensorrtllm_backend/all_models/inflight_batcher_llm/. ${TRTLLM_MODEL_REPO} -r
 
             python3 /models/tensorrtllm_backend/tools/fill_template.py -i ${TRTLLM_MODEL_REPO}/preprocessing/config.pbtxt tokenizer_dir:${HF_LLAMA_MODEL},triton_max_batch_size:64,preprocessing_instance_count:1
             python3 /models/tensorrtllm_backend/tools/fill_template.py -i ${TRTLLM_MODEL_REPO}/postprocessing/config.pbtxt tokenizer_dir:${HF_LLAMA_MODEL},triton_max_batch_size:64,postprocessing_instance_count:1
