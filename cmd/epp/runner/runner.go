@@ -40,6 +40,7 @@ import (
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/common/config/loader"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
+
 	// Import the latency predictor package
 	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/latencypredictorasync"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
@@ -93,11 +94,11 @@ var (
 		"refreshPrometheusMetricsInterval",
 		runserver.DefaultRefreshPrometheusMetricsInterval,
 		"interval to flush prometheus metrics")
-	logVerbosity = flag.Int("v", logging.DEFAULT, "number for the log level verbosity")
+	logVerbosity  = flag.Int("v", logging.DEFAULT, "number for the log level verbosity")
 	secureServing = flag.Bool(
 		"secureServing", runserver.DefaultSecureServing, "Enables secure serving. Defaults to true.")
 	healthChecking = flag.Bool("healthChecking", runserver.DefaultHealthChecking, "Enables health checking")
-	certPath = flag.String(
+	certPath       = flag.String(
 		"certPath", "", "The path to the certificate for secure serving. The certificate and private key files "+
 			"are assumed to be named tls.crt and tls.key, respectively. If not set, and secureServing is enabled, "+
 			"then a self-signed certificate is used.")
@@ -222,11 +223,11 @@ func (r *Runner) Run(ctx context.Context) error {
 	// ===================================================================
 	// == Latency Predictor Integration
 	// ===================================================================
-	var predictor latencypredictor.PredictorInterface  // Use the interface type
+	var predictor latencypredictor.PredictorInterface // Use the interface type
 	if *enableLatencyPredictor {
 		setupLog.Info("Latency predictor is enabled. Initializing...")
 		predictor = latencypredictor.New(latencypredictor.ConfigFromEnv(), ctrl.Log.WithName("latency-predictor"))
-		
+
 		// For the runnable, you'll need to type assert back to the concrete type
 		concretePredictor := predictor.(*latencypredictor.Predictor)
 		if err := mgr.Add(runnable.NoLeaderElection(&predictorRunnable{predictor: concretePredictor})); err != nil {
@@ -235,10 +236,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	} else {
 		setupLog.Info("Latency predictor is disabled.")
-		predictor = nil  // This will be a true nil interface
+		predictor = nil // This will be a true nil interface
 	}
 
-	
 	// ===================================================================
 
 	if len(*configText) != 0 || len(*configFile) != 0 {
@@ -281,18 +281,18 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	// --- Setup ExtProc Server Runner ---
 	serverRunner := &runserver.ExtProcServerRunner{
-		GrpcPort:                         *grpcPort,
+		GrpcPort:                                 *grpcPort,
 		DestinationEndpointHintMetadataNamespace: *destinationEndpointHintMetadataNamespace,
-		DestinationEndpointHintKey:       *destinationEndpointHintKey,
-		PoolNamespacedName:               poolNamespacedName,
-		Datastore:                        datastore,
-		SecureServing:                    *secureServing,
-		HealthChecking:                   *healthChecking,
-		CertPath:                         *certPath,
-		RefreshPrometheusMetricsInterval: *refreshPrometheusMetricsInterval,
-		Director:                         director,
-		SaturationDetector:               saturationDetector,
-		LatencyPredictor:                 predictor,
+		DestinationEndpointHintKey:               *destinationEndpointHintKey,
+		PoolNamespacedName:                       poolNamespacedName,
+		Datastore:                                datastore,
+		SecureServing:                            *secureServing,
+		HealthChecking:                           *healthChecking,
+		CertPath:                                 *certPath,
+		RefreshPrometheusMetricsInterval:         *refreshPrometheusMetricsInterval,
+		Director:                                 director,
+		SaturationDetector:                       saturationDetector,
+		LatencyPredictor:                         predictor,
 	}
 	if err := serverRunner.SetupWithManager(ctx, mgr); err != nil {
 		setupLog.Error(err, "Failed to setup EPP controllers")
@@ -321,13 +321,13 @@ func (r *Runner) Run(ctx context.Context) error {
 	return nil
 }
 
-func (r *Runner) initializeScheduler(datastore datastore.Datastore,) (*scheduling.Scheduler, error) {
+func (r *Runner) initializeScheduler(datastore datastore.Datastore) (*scheduling.Scheduler, error) {
 	if r.schedulerConfig != nil {
-		return scheduling.NewSchedulerWithConfig(datastore, r.schedulerConfig), nil
+		return scheduling.NewSchedulerWithConfig(r.schedulerConfig), nil
 	}
 
 	// otherwise, no one configured from outside scheduler config. use existing configuration
-	scheduler := scheduling.NewScheduler(datastore)
+	scheduler := scheduling.NewScheduler()
 	if schedulerV2 {
 		queueScorerWeight := envutil.GetEnvInt("QUEUE_SCORE_WEIGHT", scorer.DefaultQueueScorerWeight, setupLog)
 		kvCacheScorerWeight := envutil.GetEnvInt("KV_CACHE_SCORE_WEIGHT", scorer.DefaultKVCacheScorerWeight, setupLog)
@@ -337,7 +337,6 @@ func (r *Runner) initializeScheduler(datastore datastore.Datastore,) (*schedulin
 				framework.NewWeightedScorer(scorer.NewKVCacheScorer(), kvCacheScorerWeight)).
 			WithPicker(picker.NewMaxScorePicker())
 
-
 		if prefixCacheScheduling {
 			prefixScorerWeight := envutil.GetEnvInt("PREFIX_CACHE_SCORE_WEIGHT", prefix.DefaultScorerWeight, setupLog)
 			if err := schedulerProfile.AddPlugins(framework.NewWeightedScorer(prefix.New(loadPrefixCacheConfig()), prefixScorerWeight)); err != nil {
@@ -346,11 +345,11 @@ func (r *Runner) initializeScheduler(datastore datastore.Datastore,) (*schedulin
 		}
 
 		schedulerConfig := scheduling.NewSchedulerConfig(profile.NewSingleProfileHandler(), map[string]*framework.SchedulerProfile{"schedulerv2": schedulerProfile})
-		scheduler = scheduling.NewSchedulerWithConfig(datastore, schedulerConfig)
+		scheduler = scheduling.NewSchedulerWithConfig(schedulerConfig)
 	}
 
 	if reqHeaderBasedSchedulerForTesting {
-		scheduler = conformance_epp.NewReqHeaderBasedScheduler(datastore)
+		scheduler = conformance_epp.NewReqHeaderBasedScheduler()
 	}
 
 	return scheduler, nil
