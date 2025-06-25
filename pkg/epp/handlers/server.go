@@ -32,6 +32,7 @@ import (
 
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
+	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	errutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/error"
@@ -53,7 +54,9 @@ func NewStreamingServer(datastore Datastore, director Director) *StreamingServer
 
 type Director interface {
 	HandleRequest(ctx context.Context, reqCtx *RequestContext) (*RequestContext, error)
-	HandleResponse(ctx context.Context, reqCtx *RequestContext) (*RequestContext, error)
+	HandleResponseHeaders(ctx context.Context, reqCtx *RequestContext) (*RequestContext, error)
+	HandleResponseBodyChunk(ctx context.Context, reqCtx *RequestContext) error
+	HandleResponseTrailers(ctx context.Context, reqCtx *RequestContext) (*RequestContext, error)
 	GetRandomPod() *backend.Pod
 }
 
@@ -81,6 +84,8 @@ type RequestContext struct {
 	ObjectiveKey              string
 	RequestReceivedTimestamp  time.Time
 	ResponseCompleteTimestamp time.Time
+	FirstTokenTimestamp     time.Time
+	LastTokenTimestamp	  time.Time
 	RequestSize               int
 	Usage                     Usage
 	ResponseSize              int
@@ -88,11 +93,21 @@ type RequestContext struct {
 	ResponseStatusCode        string
 	RequestRunning            bool
 	Request                   *Request
+	Prompt 				  string
+
+	LastSeenMetrics *backendmetrics.MetricsState
+	SchedulingResult 	  *schedulingtypes.SchedulingResult
 
 	SchedulingRequest *schedulingtypes.LLMRequest
 
 	RequestState         StreamRequestState
-	modelServerStreaming bool
+	ModelServerStreaming bool
+
+	PredictedTTFT float64
+	PredictedTPOTObservations []float64
+
+	TPOTObservations	[]float64
+	TTFT float64
 
 	Response *Response
 
@@ -104,6 +119,8 @@ type RequestContext struct {
 	respBodyResp    []*extProcPb.ProcessingResponse
 	respTrailerResp *extProcPb.ProcessingResponse
 }
+
+
 
 type Request struct {
 	Headers  map[string]string
@@ -242,7 +259,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				if header.Key == "status" && value != "200" {
 					reqCtx.ResponseStatusCode = errutil.ModelServerError
 				} else if header.Key == "content-type" && strings.Contains(value, "text/event-stream") {
-					reqCtx.modelServerStreaming = true
+					reqCtx.ModelServerStreaming = true
 					loggerTrace.Info("model server is streaming response")
 				}
 			}
@@ -260,11 +277,14 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			reqCtx.respHeaderResp = s.generateResponseHeaderResponse(reqCtx)
 
 		case *extProcPb.ProcessingRequest_ResponseBody:
-			if reqCtx.modelServerStreaming {
+			if reqCtx.ModelServerStreaming {
 				// Currently we punt on response parsing if the modelServer is streaming, and we just passthrough.
 
 				responseText := string(v.ResponseBody.Body)
 				s.HandleResponseBodyModelStreaming(ctx, reqCtx, responseText)
+				if reqCtx.FirstTokenTimestamp.IsZero() {
+					reqCtx.FirstTokenTimestamp = time.Now()
+				}
 				if v.ResponseBody.EndOfStream {
 					loggerTrace.Info("stream completed")
 
@@ -312,7 +332,10 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				}
 			}
 		case *extProcPb.ProcessingRequest_ResponseTrailers:
-			// This is currently unused.
+			if reqCtx.ModelServerStreaming{
+				// Currently we punt on response trailers if the modelServer is streaming, and we just passthrough.
+				s.HandleResponseTrailers(ctx, reqCtx)
+			} 
 		}
 
 		// Handle the err and fire an immediate response.
