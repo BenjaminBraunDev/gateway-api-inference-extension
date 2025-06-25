@@ -40,6 +40,8 @@ import (
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/common/config"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
+	// Import the latency predictor package
+	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/latencypredictorasync"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics/collectors"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
@@ -91,11 +93,11 @@ var (
 		"refreshPrometheusMetricsInterval",
 		runserver.DefaultRefreshPrometheusMetricsInterval,
 		"interval to flush prometheus metrics")
-	logVerbosity  = flag.Int("v", logging.DEFAULT, "number for the log level verbosity")
+	logVerbosity = flag.Int("v", logging.DEFAULT, "number for the log level verbosity")
 	secureServing = flag.Bool(
 		"secureServing", runserver.DefaultSecureServing, "Enables secure serving. Defaults to true.")
 	healthChecking = flag.Bool("healthChecking", runserver.DefaultHealthChecking, "Enables health checking")
-	certPath       = flag.String(
+	certPath = flag.String(
 		"certPath", "", "The path to the certificate for secure serving. The certificate and private key files "+
 			"are assumed to be named tls.crt and tls.key, respectively. If not set, and secureServing is enabled, "+
 			"then a self-signed certificate is used.")
@@ -113,6 +115,9 @@ var (
 	// configuration flags
 	configFile = flag.String("configFile", "", "The path to the configuration file")
 	configText = flag.String("configText", "", "The configuration specified as text, in lieu of a file")
+
+	// Latency Predictor Flag
+	enableLatencyPredictor = flag.Bool("enable-latency-predictor", false, "Enable the regression-based latency predictor and scheduler scorer.")
 
 	setupLog = ctrl.Log.WithName("setup")
 
@@ -195,11 +200,6 @@ func (r *Runner) Run(ctx context.Context) error {
 	customCollectors := []prometheus.Collector{collectors.NewInferencePoolMetricsCollector(datastore)}
 	metrics.Register(customCollectors...)
 	metrics.RecordInferenceExtensionInfo()
-	// Register metrics handler.
-	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
-	// More info:
-	// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.1/pkg/metrics/server
-	// - https://book.kubebuilder.io/reference/metrics.html
 	metricsServerOptions := metricsserver.Options{
 		BindAddress:    fmt.Sprintf(":%d", *metricsPort),
 		FilterProvider: filters.WithAuthenticationAndAuthorization,
@@ -214,6 +214,25 @@ func (r *Runner) Run(ctx context.Context) error {
 		setupLog.Error(err, "Failed to create controller manager")
 		return err
 	}
+
+	// ===================================================================
+	// == Latency Predictor Integration
+	// ===================================================================
+	var predictor *latencypredictor.Predictor
+	if *enableLatencyPredictor {
+		setupLog.Info("Latency predictor is enabled. Initializing...")
+		// Create the predictor instance. It will be configured from environment variables.
+		predictor = latencypredictor.New(latencypredictor.ConfigFromEnv(), ctrl.Log.WithName("latency-predictor"))
+
+		// Add the predictor as a runnable to the manager to handle its lifecycle (Start/Stop).
+		if err := mgr.Add(runnable.NoLeaderElection(&predictorRunnable{predictor: predictor})); err != nil {
+			setupLog.Error(err, "Failed to register latency predictor runnable")
+			return err
+		}
+	} else {
+		setupLog.Info("Latency predictor is disabled.")
+	}
+	// ===================================================================
 
 	if len(*configText) != 0 || len(*configFile) != 0 {
 		theConfig, err := config.LoadConfig([]byte(*configText), *configFile)
@@ -242,7 +261,8 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 
 	// --- Initialize Core EPP Components ---
-	scheduler, err := r.initializeScheduler(datastore)
+	// Pass the predictor instance to the scheduler initializer. It will be nil if disabled.
+	scheduler, err := r.initializeScheduler(datastore, predictor)
 	if err != nil {
 		setupLog.Error(err, "Failed to create scheduler")
 		return err
@@ -250,21 +270,22 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	saturationDetector := saturationdetector.NewDetector(sdConfig, datastore, ctrl.Log)
 
-	director := requestcontrol.NewDirectorWithConfig(datastore, scheduler, saturationDetector, r.requestControlConfig)
+	// Pass the predictor instance to the Director. It will be nil if disabled.
+	director := requestcontrol.NewDirectorWithConfig(datastore, scheduler, saturationDetector, r.requestControlConfig, predictor)
 
 	// --- Setup ExtProc Server Runner ---
 	serverRunner := &runserver.ExtProcServerRunner{
-		GrpcPort:                                 *grpcPort,
+		GrpcPort:                         *grpcPort,
 		DestinationEndpointHintMetadataNamespace: *destinationEndpointHintMetadataNamespace,
-		DestinationEndpointHintKey:               *destinationEndpointHintKey,
-		PoolNamespacedName:                       poolNamespacedName,
-		Datastore:                                datastore,
-		SecureServing:                            *secureServing,
-		HealthChecking:                           *healthChecking,
-		CertPath:                                 *certPath,
-		RefreshPrometheusMetricsInterval:         *refreshPrometheusMetricsInterval,
-		Director:                                 director,
-		SaturationDetector:                       saturationDetector,
+		DestinationEndpointHintKey:       *destinationEndpointHintKey,
+		PoolNamespacedName:               poolNamespacedName,
+		Datastore:                        datastore,
+		SecureServing:                    *secureServing,
+		HealthChecking:                   *healthChecking,
+		CertPath:                         *certPath,
+		RefreshPrometheusMetricsInterval: *refreshPrometheusMetricsInterval,
+		Director:                         director,
+		SaturationDetector:               saturationDetector,
 	}
 	if err := serverRunner.SetupWithManager(ctx, mgr); err != nil {
 		setupLog.Error(err, "Failed to setup EPP controllers")
@@ -293,7 +314,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	return nil
 }
 
-func (r *Runner) initializeScheduler(datastore datastore.Datastore) (*scheduling.Scheduler, error) {
+func (r *Runner) initializeScheduler(datastore datastore.Datastore, predictor *latencypredictor.Predictor) (*scheduling.Scheduler, error) {
 	if r.schedulerConfig != nil {
 		return scheduling.NewSchedulerWithConfig(datastore, r.schedulerConfig), nil
 	}
@@ -308,6 +329,7 @@ func (r *Runner) initializeScheduler(datastore datastore.Datastore) (*scheduling
 			WithScorers(framework.NewWeightedScorer(scorer.NewQueueScorer(), queueScorerWeight),
 				framework.NewWeightedScorer(scorer.NewKVCacheScorer(), kvCacheScorerWeight)).
 			WithPicker(picker.NewMaxScorePicker())
+
 
 		if prefixCacheScheduling {
 			prefixScorerWeight := envutil.GetEnvInt("PREFIX_CACHE_SCORE_WEIGHT", prefix.DefaultScorerWeight, setupLog)
@@ -402,3 +424,23 @@ func verifyMetricMapping(mapping backendmetrics.MetricMapping, logger logr.Logge
 		logger.Info("Not scraping metric: LoraRequestInfo")
 	}
 }
+
+// ===================================================================
+// == Latency Predictor Plugin and Helpers
+// ===================================================================
+
+// predictorRunnable implements controller-runtime's Runnable interface to manage the predictor's lifecycle.
+type predictorRunnable struct {
+	predictor *latencypredictor.Predictor
+}
+
+// Start begins the predictor's background processes and blocks until the context is cancelled.
+func (p *predictorRunnable) Start(ctx context.Context) error {
+	setupLog.Info("Starting latency predictor...")
+	p.predictor.Start()
+	<-ctx.Done()
+	setupLog.Info("Stopping latency predictor...")
+	p.predictor.Stop()
+	return nil
+}
+

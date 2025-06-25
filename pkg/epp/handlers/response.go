@@ -79,6 +79,17 @@ func (s *StreamingServer) HandleResponseBodyModelStreaming(
 		metrics.RecordInputTokens(reqCtx.Model, reqCtx.ResolvedTargetModel, resp.Usage.PromptTokens)
 		metrics.RecordOutputTokens(reqCtx.Model, reqCtx.ResolvedTargetModel, resp.Usage.CompletionTokens)
 	}
+	s.director.HandleResponseBodyChunk(ctx, reqCtx)
+}
+
+
+// The function is to handle streaming response if the modelServer is streaming.
+func (s *StreamingServer) HandleResponseTrailers(
+	ctx context.Context,
+	reqCtx *RequestContext,
+) {
+
+	s.director.HandleResponseTrailers(ctx, reqCtx)
 }
 
 func (s *StreamingServer) HandleResponseHeaders(ctx context.Context, reqCtx *RequestContext, resp *extProcPb.ProcessingRequest_ResponseHeaders) (*RequestContext, error) {
@@ -90,7 +101,7 @@ func (s *StreamingServer) HandleResponseHeaders(ctx context.Context, reqCtx *Req
 		}
 	}
 
-	reqCtx, err := s.director.HandleResponse(ctx, reqCtx)
+	reqCtx, err := s.director.HandleResponseHeaders(ctx, reqCtx)
 
 	return reqCtx, err
 }
