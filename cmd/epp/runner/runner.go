@@ -248,7 +248,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	// ===================================================================
 
-	err = r.parseConfiguration()
+	err = r.parseConfiguration(ctx)
 	if err != nil {
 		setupLog.Error(err, "Failed to parse the configuration")
 		return err
@@ -344,14 +344,14 @@ func (r *Runner) initializeScheduler(datastore datastore.Datastore) (*scheduling
 	return scheduler, nil
 }
 
-func (r *Runner) parseConfiguration() error {
+func (r *Runner) parseConfiguration(ctx context.Context) error {
 	if len(*configText) != 0 || len(*configFile) != 0 {
 		theConfig, err := loader.LoadConfig([]byte(*configText), *configFile)
 		if err != nil {
 			return fmt.Errorf("failed to load the configuration - %w", err)
 		}
 
-		epp := newEppHandle()
+		epp := newEppHandle(ctx)
 
 		err = loader.LoadPluginReferences(theConfig.Plugins, epp)
 		if err != nil {
