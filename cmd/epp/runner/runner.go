@@ -218,20 +218,23 @@ func (r *Runner) Run(ctx context.Context) error {
 	// ===================================================================
 	// == Latency Predictor Integration
 	// ===================================================================
-	var predictor *latencypredictor.Predictor
+	var predictor latencypredictor.PredictorInterface  // Use the interface type
 	if *enableLatencyPredictor {
 		setupLog.Info("Latency predictor is enabled. Initializing...")
-		// Create the predictor instance. It will be configured from environment variables.
 		predictor = latencypredictor.New(latencypredictor.ConfigFromEnv(), ctrl.Log.WithName("latency-predictor"))
-
-		// Add the predictor as a runnable to the manager to handle its lifecycle (Start/Stop).
-		if err := mgr.Add(runnable.NoLeaderElection(&predictorRunnable{predictor: predictor})); err != nil {
+		
+		// For the runnable, you'll need to type assert back to the concrete type
+		concretePredictor := predictor.(*latencypredictor.Predictor)
+		if err := mgr.Add(runnable.NoLeaderElection(&predictorRunnable{predictor: concretePredictor})); err != nil {
 			setupLog.Error(err, "Failed to register latency predictor runnable")
 			return err
 		}
 	} else {
 		setupLog.Info("Latency predictor is disabled.")
+		predictor = nil  // This will be a true nil interface
 	}
+
+	
 	// ===================================================================
 
 	if len(*configText) != 0 || len(*configFile) != 0 {
@@ -262,7 +265,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	// --- Initialize Core EPP Components ---
 	// Pass the predictor instance to the scheduler initializer. It will be nil if disabled.
-	scheduler, err := r.initializeScheduler(datastore, predictor)
+	scheduler, err := r.initializeScheduler(datastore)
 	if err != nil {
 		setupLog.Error(err, "Failed to create scheduler")
 		return err
@@ -286,6 +289,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		RefreshPrometheusMetricsInterval: *refreshPrometheusMetricsInterval,
 		Director:                         director,
 		SaturationDetector:               saturationDetector,
+		LatencyPredictor:                 predictor,
 	}
 	if err := serverRunner.SetupWithManager(ctx, mgr); err != nil {
 		setupLog.Error(err, "Failed to setup EPP controllers")
@@ -314,7 +318,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	return nil
 }
 
-func (r *Runner) initializeScheduler(datastore datastore.Datastore, predictor *latencypredictor.Predictor) (*scheduling.Scheduler, error) {
+func (r *Runner) initializeScheduler(datastore datastore.Datastore,) (*scheduling.Scheduler, error) {
 	if r.schedulerConfig != nil {
 		return scheduling.NewSchedulerWithConfig(datastore, r.schedulerConfig), nil
 	}
@@ -334,7 +338,7 @@ func (r *Runner) initializeScheduler(datastore datastore.Datastore, predictor *l
 		if prefixCacheScheduling {
 			prefixScorerWeight := envutil.GetEnvInt("PREFIX_CACHE_SCORE_WEIGHT", prefix.DefaultScorerWeight, setupLog)
 			if err := schedulerProfile.AddPlugins(framework.NewWeightedScorer(prefix.New(loadPrefixCacheConfig()), prefixScorerWeight)); err != nil {
-				return nil, fmt.Errorf("Failed to register scheduler plugins - %w", err)
+				return nil, fmt.Errorf("failed to register scheduler plugins - %w", err)
 			}
 		}
 
@@ -443,4 +447,3 @@ func (p *predictorRunnable) Start(ctx context.Context) error {
 	p.predictor.Stop()
 	return nil
 }
-
