@@ -93,9 +93,11 @@ type Extension struct {
 	ExtensionConnection `json:",inline"`
 }
 
-// ExtensionReference is a reference to the extension deployment. When ExtensionReference is invalid,
-// a 5XX status code MUST be returned for the request that would have otherwise been routed to the
-// invalid backend.
+// ExtensionReference is a reference to the extension.
+//
+// If a reference is invalid, the implementation MUST update the `ResolvedRefs`
+// Condition on the InferencePool's status to `status: False`. A 5XX status code MUST be returned
+// for the request that would have otherwise been routed to the invalid backend.
 type ExtensionReference struct {
 	// Group is the group of the referent.
 	// The default value is "", representing the Core API group.
@@ -209,6 +211,7 @@ const (
 	// Possible reasons for this condition to be False are:
 	//
 	// * "NotSupportedByGateway"
+	// * "HTTPRouteNotAccepted"
 	//
 	// Possible reasons for this condition to be Unknown are:
 	//
@@ -227,6 +230,11 @@ const (
 	// InferencePool as a backend.
 	InferencePoolReasonNotSupportedByGateway InferencePoolReason = "NotSupportedByGateway"
 
+	// This reason is used with the "Accepted" condition when the InferencePool is
+	// referenced by an HTTPRoute that has been rejected by the Gateway. The user
+	// should inspect the status of the referring HTTPRoute for the specific reason.
+	InferencePoolReasonHTTPRouteNotAccepted InferencePoolReason = "HTTPRouteNotAccepted"
+
 	// This reason is used with the "Accepted" when a controller has not yet
 	// reconciled the InferencePool.
 	InferencePoolReasonPending InferencePoolReason = "Pending"
@@ -236,7 +244,7 @@ const (
 	// This condition indicates whether the controller was able to resolve all
 	// the object references for the InferencePool.
 	//
-	// Possible reasons for this condition to be true are:
+	// Possible reasons for this condition to be True are:
 	//
 	// * "ResolvedRefs"
 	//

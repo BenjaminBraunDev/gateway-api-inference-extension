@@ -160,7 +160,11 @@ type Extension struct {
       ExtensionConnection `json:",inline"`
 }
 
-// ExtensionReference is a reference to the extension deployment.
+// ExtensionReference is a reference to the extension.
+//
+// If a reference is invalid, the implementation MUST update the `ResolvedRefs`
+// Condition on the InferencePool's status to `status: False`. A 5XX status code MUST be returned
+// for the request that would have otherwise been routed to the invalid backend.
 type ExtensionReference struct {
       // Group is the group of the referent.
       // The default value is "", representing the Core API group.
