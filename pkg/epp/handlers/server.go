@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"strings"
 	"time"
 
@@ -59,6 +60,7 @@ type Director interface {
 	HandleResponseBodyChunk(ctx context.Context, reqCtx *RequestContext) error
 	HandleResponseTrailers(ctx context.Context, reqCtx *RequestContext) (*RequestContext, error)
 	GetRandomPod() *backend.Pod
+	IsPredictorAvailable() bool
 }
 
 type Datastore interface {
@@ -133,6 +135,8 @@ type Request struct {
 }
 type Response struct {
 	Headers map[string]string
+	Trailers map[string]string
+	
 }
 type StreamRequestState int
 
@@ -163,6 +167,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 		},
 		Response: &Response{
 			Headers: make(map[string]string),
+			Trailers: make(map[string]string),
 		},
 	}
 
@@ -285,6 +290,44 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 					reqCtx.ResponseCompleteTimestamp = time.Now()
 					metrics.RecordRequestLatencies(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.RequestReceivedTimestamp, reqCtx.ResponseCompleteTimestamp)
 					metrics.RecordResponseSizes(reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.ResponseSize)
+
+					if s.director.IsPredictorAvailable() {
+					var sumActual, sumPred float64
+        			for i, actual := range reqCtx.TPOTObservations {
+            			sumActual += actual
+            			sumPred += reqCtx.PredictedTPOTObservations[i]
+        			}
+       				avgActual := sumActual / float64(len(reqCtx.TPOTObservations))
+        			avgPred := sumPred / float64(len(reqCtx.PredictedTPOTObservations))
+        			
+					
+					
+					
+        			// Compute MAPE for TTFT
+        			mapeTTFT := 0.0
+        			if reqCtx.TTFT > 0 {
+            			mapeTTFT = math.Abs((reqCtx.TTFT-reqCtx.PredictedTTFT)/reqCtx.TTFT) * 100
+						logger.V(logutil.DEBUG).Info("Averages calculated", "avgActualTTFT", reqCtx.TTFT, "avgPredictedTTFT", reqCtx.PredictedTTFT)
+						logger.V(logutil.DEBUG).Info("MAPE TTFT computed", "mapeTTFT%", mapeTTFT)
+						metrics.RecordRequestTTFT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.TTFT/1000)
+						metrics.RecordRequestTTFTPredictionMape(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, mapeTTFT)
+
+        				}
+        			
+
+					mapeTPOT := 0.0
+					if avgActual > 0 {
+						mapeTPOT = math.Abs((avgActual-avgPred)/avgActual) * 100
+						logger.V(logutil.DEBUG).Info("Averages calculated", "avgActualTPOT", avgActual, "avgPredictedTPOT", avgPred)
+						logger.V(logutil.DEBUG).Info("MAPE TPOT computed", "mapeTPOT%", mapeTPOT)
+						metrics.RecordRequestTPOT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, avgActual/1000)
+						metrics.RecordRequestTPOTPredictionMape(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, mapeTPOT)
+					}
+				}
+					 
+					
+					
+
 				}
 
 				reqCtx.respBodyResp = generateResponseBodyResponses(v.ResponseBody.Body, v.ResponseBody.EndOfStream)
@@ -318,9 +361,15 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				}
 			}
 		case *extProcPb.ProcessingRequest_ResponseTrailers:
+			logger.V(logutil.DEBUG).Info("Processing response trailers", "trailers", v.ResponseTrailers.Trailers)
 			if reqCtx.ModelServerStreaming{
-				// Currently we punt on response trailers if the modelServer is streaming, and we just passthrough.
-				s.HandleResponseTrailers(ctx, reqCtx)
+				
+				var trailerErr error
+				reqCtx, trailerErr = s.HandleResponseTrailers(ctx, reqCtx)
+				if trailerErr != nil {
+					                    logger.V(logutil.DEFAULT).Error(trailerErr, "Failed to process response trailers")
+					                }
+				reqCtx.respTrailerResp = s.generateResponseTrailerResponse(reqCtx)
 			} 
 		}
 
@@ -407,6 +456,8 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 	}
 	return nil
 }
+
+
 
 func BuildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
 	var resp *extProcPb.ProcessingResponse
