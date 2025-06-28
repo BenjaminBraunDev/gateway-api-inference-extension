@@ -119,6 +119,9 @@ var (
 		"total-queued-requests-metric",
 		runserver.DefaultTotalQueuedRequestsMetric,
 		"Prometheus metric for the number of queued requests.")
+	totalRunningRequestsMetric = flag.String("totalRunningRequestsMetric",
+		"vllm:num_requests_running",
+		"Prometheus metric for the number of running requests. This is the same as totalQueuedRequestsMetric, but for running requests.")
 	kvCacheUsagePercentageMetric = flag.String(
 		"kv-cache-usage-percentage-metric",
 		runserver.DefaultKvCacheUsagePercentageMetric,
@@ -253,6 +256,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	// --- Setup Datastore ---
 	mapping, err := backendmetrics.NewMetricMapping(
 		*totalQueuedRequestsMetric,
+		*totalRunningRequestsMetric, // This is the same as totalQueuedRequestsMetric, but for running requests.
 		*kvCacheUsagePercentageMetric,
 		*loraInfoMetric,
 	)
@@ -603,6 +607,9 @@ func verifyMetricMapping(mapping backendmetrics.MetricMapping, logger logr.Logge
 	}
 	if mapping.LoraRequestInfo == nil {
 		logger.Info("Not scraping metric: LoraRequestInfo")
+	}
+	if mapping.TotalRunningRequests == nil {
+		logger.Info("Not scraping metric: TotalRunningRequests")
 	}
 }
 
