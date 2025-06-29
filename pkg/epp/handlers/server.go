@@ -80,7 +80,6 @@ type StreamingServer struct {
 	director                                 Director
 }
 
-
 // RequestContext stores context information during the life time of an HTTP request.
 // TODO: The requestContext is gathering a ton of fields. A future refactor needs to tease these fields apart.
 // Specifically, there are fields related to the ext-proc protocol, and then fields related to the lifecycle of the request.
@@ -92,8 +91,8 @@ type RequestContext struct {
 	ResolvedTargetModel       string
 	RequestReceivedTimestamp  time.Time
 	ResponseCompleteTimestamp time.Time
-	FirstTokenTimestamp     time.Time
-	LastTokenTimestamp	  time.Time
+	FirstTokenTimestamp       time.Time
+	LastTokenTimestamp        time.Time
 	RequestSize               int
 	Usage                     Usage
 	ResponseSize              int
@@ -101,24 +100,24 @@ type RequestContext struct {
 	ResponseStatusCode        string
 	RequestRunning            bool
 	Request                   *Request
-	Prompt 				  string
-	GeneratedTokenCount int
+	Prompt                    string
+	GeneratedTokenCount       int
 
-	LastSeenMetrics *backendmetrics.MetricsState
-	SchedulingResult 	  *schedulingtypes.SchedulingResult
+	LastSeenMetrics  *backendmetrics.MetricsState
+	SchedulingResult *schedulingtypes.SchedulingResult
 
 	SchedulingRequest *schedulingtypes.LLMRequest
 
 	RequestState         StreamRequestState
 	ModelServerStreaming bool
 
-	TTFT float64
+	TTFT          float64
 	PredictedTTFT float64
 
 	PredictedTPOTObservations []float64
-	TPOTObservations	[]float64
-	AvgTPOT float64
-	AvgPredictedTPOT float64
+	TPOTObservations          []float64
+	AvgTPOT                   float64
+	AvgPredictedTPOT          float64
 
 	TokenSampler *requtil.TokenSampler
 
@@ -133,17 +132,14 @@ type RequestContext struct {
 	respTrailerResp *extProcPb.ProcessingResponse
 }
 
-
-
 type Request struct {
 	Headers  map[string]string
-	Body     map[string]interface{}
+	Body     map[string]any
 	Metadata map[string]any
 }
 type Response struct {
-	Headers map[string]string
+	Headers  map[string]string
 	Trailers map[string]string
-	
 }
 type StreamRequestState int
 
@@ -170,17 +166,17 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 		RequestState: RequestReceived,
 		Request: &Request{
 			Headers:  make(map[string]string),
-			Body:     make(map[string]interface{}),
+			Body:     make(map[string]any),
 			Metadata: make(map[string]any),
 		},
 		Response: &Response{
-			Headers: make(map[string]string),
+			Headers:  make(map[string]string),
 			Trailers: make(map[string]string),
 		},
 	}
 
 	var body []byte
-	var responseBody map[string]interface{}
+	var responseBody map[string]any
 
 	// Create error handling var as each request should only report once for
 	// error metrics. This doesn't cover the error "Cannot receive stream request" because
@@ -302,49 +298,44 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 					metrics.RecordResponseSizes(reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.ResponseSize)
 
 					if s.director.IsPredictorAvailable() {
-					// var sumActual, sumPred float64
-        			// for _, actual := range reqCtx.TPOTObservations {
-            		// 	sumActual += actual
-            			
-        			// }
-					// for _, prediction := range reqCtx.PredictedTPOTObservations {
-            		// 	sumPred += prediction
-            			
-        			// }
-				
-       				// avgActual := sumActual / float64(len(reqCtx.TPOTObservations))
-        			// avgPred := sumPred / float64(len(reqCtx.PredictedTPOTObservations))
-        			
-					// reqCtx.AvgTPOT = avgActual
-					// reqCtx.AvgPredictedTPOT = avgPred
-					
-					
-        			// Compute MAPE for TTFT
-        			mapeTTFT := 0.0
-        			if reqCtx.TTFT > 0 {
-            			mapeTTFT = math.Abs((reqCtx.TTFT-reqCtx.PredictedTTFT)/reqCtx.TTFT) * 100
-						logger.V(logutil.DEBUG).Info("Averages calculated", "avgActualTTFT", reqCtx.TTFT, "avgPredictedTTFT", reqCtx.PredictedTTFT)
-						logger.V(logutil.DEBUG).Info("MAPE TTFT computed", "mapeTTFT%", mapeTTFT)
-						metrics.RecordRequestTTFT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.TTFT/1000)
-						metrics.RecordRequestPredictedTTFT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.PredictedTTFT/1000)
-						metrics.RecordRequestTTFTPredictionMape(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, mapeTTFT)
+						// var sumActual, sumPred float64
+						// for _, actual := range reqCtx.TPOTObservations {
+						// 	sumActual += actual
 
-        				}
-        			
+						// }
+						// for _, prediction := range reqCtx.PredictedTPOTObservations {
+						// 	sumPred += prediction
 
-					mapeTPOT := 0.0
-					if reqCtx.AvgTPOT > 0 {
-						mapeTPOT = math.Abs((reqCtx.AvgTPOT-reqCtx.AvgPredictedTPOT)/reqCtx.AvgTPOT) * 100
-						logger.V(logutil.DEBUG).Info("Averages calculated", "avgActualTPOT", reqCtx.AvgTPOT, "avgPredictedTPOT", reqCtx.AvgPredictedTPOT)
-						logger.V(logutil.DEBUG).Info("MAPE TPOT computed", "mapeTPOT%", mapeTPOT)
-						metrics.RecordRequestTPOT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.AvgTPOT/1000)
-						metrics.RecordRequestPredictedTPOT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.AvgPredictedTPOT/1000)
-						metrics.RecordRequestTPOTPredictionMape(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, mapeTPOT)
+						// }
+
+						// avgActual := sumActual / float64(len(reqCtx.TPOTObservations))
+						// avgPred := sumPred / float64(len(reqCtx.PredictedTPOTObservations))
+
+						// reqCtx.AvgTPOT = avgActual
+						// reqCtx.AvgPredictedTPOT = avgPred
+
+						// Compute MAPE for TTFT
+						mapeTTFT := 0.0
+						if reqCtx.TTFT > 0 {
+							mapeTTFT = math.Abs((reqCtx.TTFT-reqCtx.PredictedTTFT)/reqCtx.TTFT) * 100
+							logger.V(logutil.DEBUG).Info("Averages calculated", "avgActualTTFT", reqCtx.TTFT, "avgPredictedTTFT", reqCtx.PredictedTTFT)
+							logger.V(logutil.DEBUG).Info("MAPE TTFT computed", "mapeTTFT%", mapeTTFT)
+							metrics.RecordRequestTTFT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.TTFT/1000)
+							metrics.RecordRequestPredictedTTFT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.PredictedTTFT/1000)
+							metrics.RecordRequestTTFTPredictionMape(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, mapeTTFT)
+
+						}
+
+						mapeTPOT := 0.0
+						if reqCtx.AvgTPOT > 0 {
+							mapeTPOT = math.Abs((reqCtx.AvgTPOT-reqCtx.AvgPredictedTPOT)/reqCtx.AvgTPOT) * 100
+							logger.V(logutil.DEBUG).Info("Averages calculated", "avgActualTPOT", reqCtx.AvgTPOT, "avgPredictedTPOT", reqCtx.AvgPredictedTPOT)
+							logger.V(logutil.DEBUG).Info("MAPE TPOT computed", "mapeTPOT%", mapeTPOT)
+							metrics.RecordRequestTPOT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.AvgTPOT/1000)
+							metrics.RecordRequestPredictedTPOT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.AvgPredictedTPOT/1000)
+							metrics.RecordRequestTPOTPredictionMape(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, mapeTPOT)
+						}
 					}
-				}
-					 
-					
-					
 
 				}
 
@@ -380,21 +371,21 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			}
 		case *extProcPb.ProcessingRequest_ResponseTrailers:
 			logger.V(logutil.DEFAULT).Info("Processing response trailers", "trailers", v.ResponseTrailers.Trailers)
-			if reqCtx.ModelServerStreaming{
-				
+			if reqCtx.ModelServerStreaming {
+
 				var trailerErr error
 				reqCtx, trailerErr = s.HandleResponseTrailers(ctx, reqCtx)
 				if trailerErr != nil {
-					                    logger.V(logutil.DEFAULT).Error(trailerErr, "Failed to process response trailers")
-					                }
+					logger.V(logutil.DEFAULT).Error(trailerErr, "Failed to process response trailers")
+				}
 				reqCtx.respTrailerResp = s.generateResponseTrailerResponse(reqCtx)
-			} 
+			}
 		}
 
 		// Handle the err and fire an immediate response.
 		if err != nil {
 			logger.V(logutil.DEFAULT).Error(err, "Failed to process request", "request", req)
-			resp, err := BuildErrResponse(err)
+			resp, err := buildErrResponse(err)
 			if err != nil {
 				return err
 			}
@@ -475,9 +466,7 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 	return nil
 }
 
-
-
-func BuildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
+func buildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
 	var resp *extProcPb.ProcessingResponse
 
 	switch errutil.CanonicalCode(err) {
@@ -500,6 +489,17 @@ func BuildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
 				ImmediateResponse: &extProcPb.ImmediateResponse{
 					Status: &envoyTypePb.HttpStatus{
 						Code: envoyTypePb.StatusCode_InternalServerError,
+					},
+				},
+			},
+		}
+	// This code can be returned by the director when there are no candidate pods for the request scheduling.
+	case errutil.ServiceUnavailable:
+		resp = &extProcPb.ProcessingResponse{
+			Response: &extProcPb.ProcessingResponse_ImmediateResponse{
+				ImmediateResponse: &extProcPb.ImmediateResponse{
+					Status: &envoyTypePb.HttpStatus{
+						Code: envoyTypePb.StatusCode_ServiceUnavailable,
 					},
 				},
 			},

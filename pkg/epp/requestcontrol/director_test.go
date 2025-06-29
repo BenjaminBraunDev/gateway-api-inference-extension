@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -67,26 +68,26 @@ func (m *mockScheduler) Schedule(_ context.Context, _ *schedulingtypes.LLMReques
 
 // mockPredictor implements the Predictor interface for testing.
 type mockPredictor struct {
-    PredictFunc         func(ctx context.Context, req latencypredictor.PredictionRequest) (*latencypredictor.PredictionResponse, error)
-    trainingSamples     []latencypredictor.TrainingEntry
-    addSampleShouldFail bool
+	PredictFunc         func(ctx context.Context, req latencypredictor.PredictionRequest) (*latencypredictor.PredictionResponse, error)
+	trainingSamples     []latencypredictor.TrainingEntry
+	addSampleShouldFail bool
 }
 
-var _ latencypredictor.PredictorInterface  = &mockPredictor{}
+var _ latencypredictor.PredictorInterface = &mockPredictor{}
 
 func (m *mockPredictor) Predict(ctx context.Context, req latencypredictor.PredictionRequest) (*latencypredictor.PredictionResponse, error) {
-    if m.PredictFunc != nil {
-        return m.PredictFunc(ctx, req)
-    }
-    return nil, errors.New("PredictFunc not implemented")
+	if m.PredictFunc != nil {
+		return m.PredictFunc(ctx, req)
+	}
+	return nil, errors.New("PredictFunc not implemented")
 }
 
 func (m *mockPredictor) AddTrainingDataBulk(entry []latencypredictor.TrainingEntry) error {
-    if m.addSampleShouldFail {
-        return errors.New("failed to add sample")
-    }
-    m.trainingSamples = append(m.trainingSamples, entry...)
-    return nil
+	if m.addSampleShouldFail {
+		return errors.New("failed to add sample")
+	}
+	m.trainingSamples = append(m.trainingSamples, entry...)
+	return nil
 }
 
 func TestDirector_HandleRequest(t *testing.T) {
@@ -172,7 +173,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 
 	tests := []struct {
 		name                   string
-		reqBodyMap             map[string]interface{}
+		reqBodyMap             map[string]any
 		mockSaturationDetector *mockSaturationDetector
 		schedulerMockSetup     func(m *mockScheduler)
 		wantErrCode            string                   // Expected errutil code string
@@ -181,7 +182,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 	}{
 		{
 			name: "successful completions request (critical, saturation ignored)",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model":  model,
 				"prompt": "critical prompt",
 			},
@@ -202,10 +203,10 @@ func TestDirector_HandleRequest(t *testing.T) {
 		},
 		{
 			name: "successful chat completions request (critical, saturation ignored)",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model": model,
-				"messages": []interface{}{
-					map[string]interface{}{
+				"messages": []any{
+					map[string]any{
 						"role":    "user",
 						"content": "critical prompt",
 					},
@@ -227,14 +228,14 @@ func TestDirector_HandleRequest(t *testing.T) {
 		},
 		{
 			name: "successful chat completions request with multiple messages (critical, saturation ignored)",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model": model,
-				"messages": []interface{}{
-					map[string]interface{}{
+				"messages": []any{
+					map[string]any{
 						"role":    "developer",
 						"content": "You are a helpful assistant.",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"role":    "user",
 						"content": "Hello!",
 					},
@@ -256,7 +257,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 		},
 		{
 			name: "successful completions request (sheddable, not saturated)",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model":  modelSheddable,
 				"prompt": "sheddable prompt",
 			},
@@ -277,7 +278,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 		},
 		{
 			name: "successful request with target model resolution",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model":  modelWithResolvedTarget,
 				"prompt": "prompt for target resolution",
 			},
@@ -311,7 +312,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 				TargetEndpoint: "192.168.1.100:8000",
 			},
 			wantMutatedBodyModel: "food-review-1",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model":  "food-review-1",
 				"prompt": "test prompt",
 			},
@@ -320,7 +321,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 		{
 
 			name: "request dropped (sheddable, saturated)",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model":  modelSheddable,
 				"prompt": "sheddable prompt",
 			},
@@ -329,27 +330,27 @@ func TestDirector_HandleRequest(t *testing.T) {
 		},
 		{
 			name:                   "model not found, expect err",
-			reqBodyMap:             map[string]interface{}{"prompt": "p"},
+			reqBodyMap:             map[string]any{"prompt": "p"},
 			mockSaturationDetector: &mockSaturationDetector{isSaturated: false},
 			wantErrCode:            errutil.BadRequest,
 		},
 
 		{
 			name:        "prompt or messages not found, expect err",
-			reqBodyMap:  map[string]interface{}{"model": model},
+			reqBodyMap:  map[string]any{"model": model},
 			wantErrCode: errutil.BadRequest,
 		},
 		{
 			name: "empty messages, expect err",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model":    model,
-				"messages": []interface{}{},
+				"messages": []any{},
 			},
 			wantErrCode: errutil.BadRequest,
 		},
 		{
 			name: "scheduler returns error",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model":  model,
 				"prompt": "prompt that causes scheduler error",
 			},
@@ -360,7 +361,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 		},
 		{
 			name: "scheduler returns nil result and nil error",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model":  model,
 				"prompt": "prompt for nil,nil scheduler return",
 			},
@@ -383,7 +384,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 			reqCtx := &handlers.RequestContext{
 				Request: &handlers.Request{
 					// Create a copy of the map for each test run to avoid mutation issues.
-					Body: make(map[string]interface{}),
+					Body: make(map[string]any),
 					Headers: map[string]string{
 						requtil.RequestIdHeaderKey: "test-req-id-" + test.name, // Ensure a default request ID
 					},
@@ -424,217 +425,349 @@ func TestDirector_HandleRequest(t *testing.T) {
 	}
 }
 
+// TestGetCandidatePodsForScheduling is testing getCandidatePodsForScheduling and more specifically the functionality of SubsetFilter.
+func TestGetCandidatePodsForScheduling(t *testing.T) {
+	var makeFilterMetadata = func(data []any) map[string]any {
+		return map[string]any{
+			"envoy.lb.subset_hint": map[string]any{
+				"x-gateway-destination-endpoint-subset": data,
+			},
+		}
+	}
+
+	testInput := []*corev1.Pod{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "pod1",
+			},
+			Status: corev1.PodStatus{
+				PodIP: "10.0.0.1",
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "pod2",
+			},
+			Status: corev1.PodStatus{
+				PodIP: "10.0.0.2",
+			},
+		},
+	}
+
+	outputPod1 := &backend.Pod{
+		NamespacedName: types.NamespacedName{Name: "pod1"},
+		Address:        "10.0.0.1",
+		Labels:         map[string]string{},
+	}
+
+	outputPod2 := &backend.Pod{
+		NamespacedName: types.NamespacedName{Name: "pod2"},
+		Address:        "10.0.0.2",
+		Labels:         map[string]string{},
+	}
+
+	tests := []struct {
+		name     string
+		metadata map[string]any
+		output   []schedulingtypes.Pod
+	}{
+		{
+			name:     "SubsetFilter, filter not present — return all pods",
+			metadata: map[string]any{},
+			output: []schedulingtypes.Pod{
+				&schedulingtypes.PodMetrics{
+					Pod:          outputPod1,
+					MetricsState: backendmetrics.NewMetricsState(),
+				},
+				&schedulingtypes.PodMetrics{
+					Pod:          outputPod2,
+					MetricsState: backendmetrics.NewMetricsState(),
+				},
+			},
+		},
+		{
+			name:     "SubsetFilter, namespace present filter not present — return all pods",
+			metadata: map[string]any{"envoy.lb.subset_hint": map[string]any{}},
+			output: []schedulingtypes.Pod{
+				&schedulingtypes.PodMetrics{
+					Pod:          outputPod1,
+					MetricsState: backendmetrics.NewMetricsState(),
+				},
+				&schedulingtypes.PodMetrics{
+					Pod:          outputPod2,
+					MetricsState: backendmetrics.NewMetricsState(),
+				},
+			},
+		},
+		{
+			name:     "SubsetFilter, filter present with empty list — return error",
+			metadata: makeFilterMetadata([]any{}),
+			output:   []schedulingtypes.Pod{},
+		},
+		{
+			name:     "SubsetFilter, subset with one matching pod",
+			metadata: makeFilterMetadata([]any{"10.0.0.1"}),
+			output: []schedulingtypes.Pod{
+				&schedulingtypes.PodMetrics{
+					Pod:          outputPod1,
+					MetricsState: backendmetrics.NewMetricsState(),
+				},
+			},
+		},
+		{
+			name:     "SubsetFilter, subset with multiple matching pods",
+			metadata: makeFilterMetadata([]any{"10.0.0.1", "10.0.0.2", "10.0.0.3"}),
+			output: []schedulingtypes.Pod{
+				&schedulingtypes.PodMetrics{
+					Pod:          outputPod1,
+					MetricsState: backendmetrics.NewMetricsState(),
+				},
+				&schedulingtypes.PodMetrics{
+					Pod:          outputPod2,
+					MetricsState: backendmetrics.NewMetricsState(),
+				},
+			},
+		},
+		{
+			name:     "SubsetFilter, subset with no matching pods",
+			metadata: makeFilterMetadata([]any{"10.0.0.3"}),
+			output:   []schedulingtypes.Pod{},
+		},
+	}
+
+	pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.FakePodMetricsClient{}, time.Second)
+	ds := datastore.NewDatastore(t.Context(), pmf)
+	for _, testPod := range testInput {
+		ds.PodUpdateOrAddIfNotExist(testPod)
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			director := NewDirectorWithConfig(ds, &mockScheduler{}, &mockSaturationDetector{}, NewConfig())
+
+			got := director.getCandidatePodsForScheduling(context.Background(), test.metadata)
+
+			diff := cmp.Diff(test.output, got, cmpopts.SortSlices(func(a, b schedulingtypes.Pod) bool {
+				return a.GetPod().NamespacedName.String() < b.GetPod().NamespacedName.String()
+			}))
+			if diff != "" {
+				t.Errorf("Unexpected output (-want +got): %v", diff)
+			}
+		})
+	}
+}
+
 // --- New Tests for Streaming Handlers ---
 
 func newTestDirectorWithMockPredictor() (*Director, *mockPredictor) {
-    mockPred := &mockPredictor{}
-    director := NewDirectorWithConfig(nil, nil, nil, NewConfig(), mockPred)
-    return director, mockPred
+	mockPred := &mockPredictor{}
+	director := NewDirectorWithConfig(nil, nil, nil, NewConfig(), mockPred)
+	return director, mockPred
 }
 
 func newTestRequestContext(kvCache float64) *handlers.RequestContext {
-    return &handlers.RequestContext{
-        Request: &handlers.Request{
+	return &handlers.RequestContext{
+		Request: &handlers.Request{
 			Headers: map[string]string{
 				requtil.RequestIdHeaderKey: "test-request-123", // Add request ID for sampler
 			},
 		},
-        Response: &handlers.Response{Headers: make(map[string]string)},
-        Prompt:  "this is a test", // 4 tokens
-        TargetPod: &backend.Pod{},
-        SchedulingResult: &schedulingtypes.SchedulingResult{
-            PrimaryProfileName: "default",
-            ProfileResults: map[string]*schedulingtypes.ProfileRunResult{
-                "default": {
-                    TargetPod: &schedulingtypes.ScoredPod{
-                        Pod: &schedulingtypes.PodMetrics{
-                            MetricsState: &backendmetrics.MetricsState{KVCacheUsagePercent: kvCache},
-                        },
-                    },
-                },
-            },
-        },
-        LastSeenMetrics: &backendmetrics.MetricsState{KVCacheUsagePercent: kvCache},
+		Response:  &handlers.Response{Headers: make(map[string]string)},
+		Prompt:    "this is a test", // 4 tokens
+		TargetPod: &backend.Pod{},
+		SchedulingResult: &schedulingtypes.SchedulingResult{
+			PrimaryProfileName: "default",
+			ProfileResults: map[string]*schedulingtypes.ProfileRunResult{
+				"default": {
+					TargetPod: &schedulingtypes.ScoredPod{
+						Pod: &schedulingtypes.PodMetrics{
+							MetricsState: &backendmetrics.MetricsState{KVCacheUsagePercent: kvCache},
+						},
+					},
+				},
+			},
+		},
+		LastSeenMetrics:          &backendmetrics.MetricsState{KVCacheUsagePercent: kvCache},
 		RequestReceivedTimestamp: time.Now().Add(-100 * time.Millisecond), // Set received timestamp
-    }
+	}
 }
 
 func TestDirector_HandleResponseHeaders(t *testing.T) {
-    ctx := logutil.NewTestLoggerIntoContext(context.Background())
-    director, mockPred := newTestDirectorWithMockPredictor()
-    
-    // Mock TTFT prediction
-    mockPred.PredictFunc = func(ctx context.Context, req latencypredictor.PredictionRequest) (*latencypredictor.PredictionResponse, error) {
-        return &latencypredictor.PredictionResponse{TTFT: 120.5}, nil
-    }
-    
-    reqCtx := newTestRequestContext(0.3)
+	ctx := logutil.NewTestLoggerIntoContext(context.Background())
+	director, mockPred := newTestDirectorWithMockPredictor()
 
-    _, err := director.HandleResponseHeaders(ctx, reqCtx)
-    require.NoError(t, err)
+	// Mock TTFT prediction
+	mockPred.PredictFunc = func(ctx context.Context, req latencypredictor.PredictionRequest) (*latencypredictor.PredictionResponse, error) {
+		return &latencypredictor.PredictionResponse{TTFT: 120.5}, nil
+	}
 
-    // Header stage should predict TTFT (always predicted for scheduling decisions)
-    assert.Equal(t, 120.5, reqCtx.PredictedTTFT, "TTFT should be predicted at header stage")
-    
-    // Header stage should not record actual TTFT or add training data
-    assert.Equal(t, float64(0), reqCtx.TTFT, "TTFT should not be measured at header stage")
-    require.Len(t, mockPred.trainingSamples, 0, "Should not add training samples at header stage")
+	reqCtx := newTestRequestContext(0.3)
+
+	_, err := director.HandleResponseHeaders(ctx, reqCtx)
+	require.NoError(t, err)
+
+	// Header stage should predict TTFT (always predicted for scheduling decisions)
+	assert.Equal(t, 120.5, reqCtx.PredictedTTFT, "TTFT should be predicted at header stage")
+
+	// Header stage should not record actual TTFT or add training data
+	assert.Equal(t, float64(0), reqCtx.TTFT, "TTFT should not be measured at header stage")
+	require.Len(t, mockPred.trainingSamples, 0, "Should not add training samples at header stage")
 }
 
 func TestDirector_HandleResponseBodyChunk_FirstToken_WithFirstTPOTPrediction(t *testing.T) {
-    ctx := logutil.NewTestLoggerIntoContext(context.Background())
-    director, mockPred := newTestDirectorWithMockPredictor()
-    
-    // Mock TPOT prediction for first token (this should be called)
-    predictionCalls := 0
-    mockPred.PredictFunc = func(ctx context.Context, req latencypredictor.PredictionRequest) (*latencypredictor.PredictionResponse, error) {
-        predictionCalls++
-        return &latencypredictor.PredictionResponse{TPOT: 35.5}, nil
-    }
+	ctx := logutil.NewTestLoggerIntoContext(context.Background())
+	director, mockPred := newTestDirectorWithMockPredictor()
 
-    reqCtx := newTestRequestContext(0.4)
-    
-    // Simulate first token arriving
-    err := director.HandleResponseBodyChunk(ctx, reqCtx)
-    require.NoError(t, err)
+	// Mock TPOT prediction for first token (this should be called)
+	predictionCalls := 0
+	mockPred.PredictFunc = func(ctx context.Context, req latencypredictor.PredictionRequest) (*latencypredictor.PredictionResponse, error) {
+		predictionCalls++
+		return &latencypredictor.PredictionResponse{TPOT: 35.5}, nil
+	}
 
-    // First token should set TTFT
-    assert.Greater(t, reqCtx.TTFT, 50.0, "TTFT should be measured and positive")
-    assert.Equal(t, 1, reqCtx.GeneratedTokenCount, "Token count should be 1 for first token")
-    assert.NotZero(t, reqCtx.LastTokenTimestamp, "LastTokenTimestamp should be set")
+	reqCtx := newTestRequestContext(0.4)
 
-    // Should ALWAYS add TTFT training sample
-    require.Len(t, mockPred.trainingSamples, 1, "Should add TTFT training sample")
-    sample := mockPred.trainingSamples[0]
-    assert.Greater(t, sample.ActualTTFT, 50.0, "TTFT training sample should have positive TTFT")
-    assert.Equal(t, 0.0, sample.ActualTPOT, "TTFT sample should have zero TPOT")
-    assert.Equal(t, 0.4, sample.KVCachePercentage)
-    assert.Equal(t, 4, sample.InputTokenLength)
+	// Simulate first token arriving
+	err := director.HandleResponseBodyChunk(ctx, reqCtx)
+	require.NoError(t, err)
 
-    // Should predict first TPOT in first token block
-    assert.Equal(t, 1, predictionCalls, "Should make exactly one TPOT prediction for next token")
-    require.Len(t, reqCtx.PredictedTPOTObservations, 1, "Should have first TPOT prediction")
-    assert.Equal(t, 35.5, reqCtx.PredictedTPOTObservations[0], "First TPOT prediction should match mocked value")
+	// First token should set TTFT
+	assert.Greater(t, reqCtx.TTFT, 50.0, "TTFT should be measured and positive")
+	assert.Equal(t, 1, reqCtx.GeneratedTokenCount, "Token count should be 1 for first token")
+	assert.NotZero(t, reqCtx.LastTokenTimestamp, "LastTokenTimestamp should be set")
 
-    // Should not have actual TPOT observations yet (that's for token 2+)
-    assert.Len(t, reqCtx.TPOTObservations, 0, "Should not have TPOT observations for first token")
-    
-    // Should have initialized the per-request token sampler
-    assert.NotNil(t, reqCtx.TokenSampler, "Should have initialized per-request TokenSampler")
+	// Should ALWAYS add TTFT training sample
+	require.Len(t, mockPred.trainingSamples, 1, "Should add TTFT training sample")
+	sample := mockPred.trainingSamples[0]
+	assert.Greater(t, sample.ActualTTFT, 50.0, "TTFT training sample should have positive TTFT")
+	assert.Equal(t, 0.0, sample.ActualTPOT, "TTFT sample should have zero TPOT")
+	assert.Equal(t, 0.4, sample.KVCachePercentage)
+	assert.Equal(t, 4, sample.InputTokenLength)
+
+	// Should predict first TPOT in first token block
+	assert.Equal(t, 1, predictionCalls, "Should make exactly one TPOT prediction for next token")
+	require.Len(t, reqCtx.PredictedTPOTObservations, 1, "Should have first TPOT prediction")
+	assert.Equal(t, 35.5, reqCtx.PredictedTPOTObservations[0], "First TPOT prediction should match mocked value")
+
+	// Should not have actual TPOT observations yet (that's for token 2+)
+	assert.Len(t, reqCtx.TPOTObservations, 0, "Should not have TPOT observations for first token")
+
+	// Should have initialized the per-request token sampler
+	assert.NotNil(t, reqCtx.TokenSampler, "Should have initialized per-request TokenSampler")
 }
 
 func TestDirector_HandleResponseBodyChunk_SecondToken_RecordsIfGeneratedTokenCountIs1(t *testing.T) {
-    ctx := logutil.NewTestLoggerIntoContext(context.Background())
-    director, mockPred := newTestDirectorWithMockPredictor()
-    
-    // Track prediction calls - should only be called for first token
-    predictionCalls := 0
-    mockPred.PredictFunc = func(ctx context.Context, req latencypredictor.PredictionRequest) (*latencypredictor.PredictionResponse, error) {
-        predictionCalls++
-        return &latencypredictor.PredictionResponse{TPOT: 30.0}, nil
-    }
+	ctx := logutil.NewTestLoggerIntoContext(context.Background())
+	director, mockPred := newTestDirectorWithMockPredictor()
 
-    reqCtx := newTestRequestContext(0.5)
-    
-    // Simulate first token
-    err := director.HandleResponseBodyChunk(ctx, reqCtx)
-    require.NoError(t, err)
-    
-    // Clear training samples and reset counter after first token
-    mockPred.trainingSamples = nil
-    predictionCalls = 0
+	// Track prediction calls - should only be called for first token
+	predictionCalls := 0
+	mockPred.PredictFunc = func(ctx context.Context, req latencypredictor.PredictionRequest) (*latencypredictor.PredictionResponse, error) {
+		predictionCalls++
+		return &latencypredictor.PredictionResponse{TPOT: 30.0}, nil
+	}
 
-    // Simulate a delay for the second token
-    time.Sleep(25 * time.Millisecond)
-    
-    // Simulate second token - this is the key test
-    err = director.HandleResponseBodyChunk(ctx, reqCtx)
-    require.NoError(t, err)
+	reqCtx := newTestRequestContext(0.5)
 
-    assert.Equal(t, 2, reqCtx.GeneratedTokenCount, "Token count should be 2")
-    
-    // KEY BEHAVIOR: Token 2 should record observation because GeneratedTokenCount was 1 when checked
-    // This is due to the implementation logic: 
-    // if reqCtx.GeneratedTokenCount == 1 || reqCtx.TokenSampler.ShouldPredict(reqCtx.GeneratedTokenCount)
-    require.Len(t, reqCtx.TPOTObservations, 1, "Should record TPOT observation for token 2 (GeneratedTokenCount was 1)")
-    assert.Greater(t, reqCtx.TPOTObservations[0], 20.0, "TPOT observation should be positive")
-    
-    // Should add TPOT training sample for token 2 (always train)
-    require.Len(t, mockPred.trainingSamples, 1, "Should add TPOT training sample")
-    sample := mockPred.trainingSamples[0]
-    assert.Equal(t, 0.0, sample.ActualTTFT, "TPOT sample should have zero TTFT")
-    assert.Greater(t, sample.ActualTPOT, 20.0, "TPOT sample should have positive TPOT")
-    
-    // Should NOT make new prediction for token 2 (no sampling call should be made)
-    assert.Equal(t, 0, predictionCalls, "Should not make new predictions for token 2")
-    
-    // Should still have the original first TPOT prediction from token 1
-    require.Len(t, reqCtx.PredictedTPOTObservations, 1, "Should still have first TPOT prediction")
+	// Simulate first token
+	err := director.HandleResponseBodyChunk(ctx, reqCtx)
+	require.NoError(t, err)
+
+	// Clear training samples and reset counter after first token
+	mockPred.trainingSamples = nil
+	predictionCalls = 0
+
+	// Simulate a delay for the second token
+	time.Sleep(25 * time.Millisecond)
+
+	// Simulate second token - this is the key test
+	err = director.HandleResponseBodyChunk(ctx, reqCtx)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, reqCtx.GeneratedTokenCount, "Token count should be 2")
+
+	// KEY BEHAVIOR: Token 2 should record observation because GeneratedTokenCount was 1 when checked
+	// This is due to the implementation logic:
+	// if reqCtx.GeneratedTokenCount == 1 || reqCtx.TokenSampler.ShouldPredict(reqCtx.GeneratedTokenCount)
+	require.Len(t, reqCtx.TPOTObservations, 1, "Should record TPOT observation for token 2 (GeneratedTokenCount was 1)")
+	assert.Greater(t, reqCtx.TPOTObservations[0], 20.0, "TPOT observation should be positive")
+
+	// Should add TPOT training sample for token 2 (always train)
+	require.Len(t, mockPred.trainingSamples, 1, "Should add TPOT training sample")
+	sample := mockPred.trainingSamples[0]
+	assert.Equal(t, 0.0, sample.ActualTTFT, "TPOT sample should have zero TTFT")
+	assert.Greater(t, sample.ActualTPOT, 20.0, "TPOT sample should have positive TPOT")
+
+	// Should NOT make new prediction for token 2 (no sampling call should be made)
+	assert.Equal(t, 0, predictionCalls, "Should not make new predictions for token 2")
+
+	// Should still have the original first TPOT prediction from token 1
+	require.Len(t, reqCtx.PredictedTPOTObservations, 1, "Should still have first TPOT prediction")
 }
 
 func TestDirector_HandleResponseBodyChunk_SubsequentTokens_OnlyRecordWhenSampled(t *testing.T) {
-    ctx := logutil.NewTestLoggerIntoContext(context.Background())
-    director, mockPred := newTestDirectorWithMockPredictor()
-    
-    // Track prediction calls
-    predictionCalls := 0
-    mockPred.PredictFunc = func(ctx context.Context, req latencypredictor.PredictionRequest) (*latencypredictor.PredictionResponse, error) {
-        predictionCalls++
-        return &latencypredictor.PredictionResponse{TPOT: 30.0}, nil
-    }
+	ctx := logutil.NewTestLoggerIntoContext(context.Background())
+	director, mockPred := newTestDirectorWithMockPredictor()
 
-    reqCtx := newTestRequestContext(0.5)
-    
-    // Simulate first token (should predict first TPOT)
-    err := director.HandleResponseBodyChunk(ctx, reqCtx)
-    require.NoError(t, err)
-    
-    // Clear training samples from first token to focus on subsequent behavior
-    mockPred.trainingSamples = nil
-    firstTPOTPredictions := predictionCalls
+	// Track prediction calls
+	predictionCalls := 0
+	mockPred.PredictFunc = func(ctx context.Context, req latencypredictor.PredictionRequest) (*latencypredictor.PredictionResponse, error) {
+		predictionCalls++
+		return &latencypredictor.PredictionResponse{TPOT: 30.0}, nil
+	}
 
-    // Simulate second token (should record due to GeneratedTokenCount == 1)
-    time.Sleep(20 * time.Millisecond)
-    err = director.HandleResponseBodyChunk(ctx, reqCtx)
-    require.NoError(t, err)
-    
-    initialObservations := len(reqCtx.TPOTObservations)
-    
-    // Clear training samples to track subsequent tokens
-    mockPred.trainingSamples = nil
+	reqCtx := newTestRequestContext(0.5)
 
-    // Simulate tokens 3-20 - these should follow normal sampling logic
+	// Simulate first token (should predict first TPOT)
+	err := director.HandleResponseBodyChunk(ctx, reqCtx)
+	require.NoError(t, err)
+
+	// Clear training samples from first token to focus on subsequent behavior
+	mockPred.trainingSamples = nil
+	firstTPOTPredictions := predictionCalls
+
+	// Simulate second token (should record due to GeneratedTokenCount == 1)
+	time.Sleep(20 * time.Millisecond)
+	err = director.HandleResponseBodyChunk(ctx, reqCtx)
+	require.NoError(t, err)
+
+	initialObservations := len(reqCtx.TPOTObservations)
+
+	// Clear training samples to track subsequent tokens
+	mockPred.trainingSamples = nil
+
+	// Simulate tokens 3-20 - these should follow normal sampling logic
 
 	num_output_tokens := 50
-    for i := 3; i <= num_output_tokens; i++ {
-        time.Sleep(15 * time.Millisecond)
-        err = director.HandleResponseBodyChunk(ctx, reqCtx)
-        require.NoError(t, err)
-    }
+	for i := 3; i <= num_output_tokens; i++ {
+		time.Sleep(15 * time.Millisecond)
+		err = director.HandleResponseBodyChunk(ctx, reqCtx)
+		require.NoError(t, err)
+	}
 
-    // Verify behavior:
-    // 1. Training happens for ALL tokens (18 tokens: 3-200)
-    assert.Equal(t, num_output_tokens-2, len(mockPred.trainingSamples), "Should train on every token 3-20")
-    
-    // 2. Observations only recorded when sampled (subset of tokens 3-20)
-    totalObservations := len(reqCtx.TPOTObservations)
-    newObservations := totalObservations - initialObservations
-    
+	// Verify behavior:
+	// 1. Training happens for ALL tokens (18 tokens: 3-200)
+	assert.Equal(t, num_output_tokens-2, len(mockPred.trainingSamples), "Should train on every token 3-20")
+
+	// 2. Observations only recorded when sampled (subset of tokens 3-20)
+	totalObservations := len(reqCtx.TPOTObservations)
+	newObservations := totalObservations - initialObservations
+
 	fmt.Printf("Initial observations: %d, New observations: %d, Training samples: %d\n", initialObservations, newObservations, len(mockPred.trainingSamples))
-    
-    // Should have fewer observations than training samples for tokens 3-20
-    assert.Less(t, newObservations, num_output_tokens, "Should have fewer observations than training samples")
-    assert.GreaterOrEqual(t, newObservations, 0, "Should have some observations")
-    
-    // Total predictions should be first TPOT + sampled predictions
-    totalPredictionCalls := predictionCalls
-    sampledPredictions := totalPredictionCalls - firstTPOTPredictions
-    
-    // New observations should equal sampled predictions (excluding token 2)
-    assert.Equal(t, newObservations, sampledPredictions, 
-        "New observations should equal sampled predictions")
 
-    assert.Equal(t, num_output_tokens, reqCtx.GeneratedTokenCount, "Should track all generated tokens")
+	// Should have fewer observations than training samples for tokens 3-20
+	assert.Less(t, newObservations, num_output_tokens, "Should have fewer observations than training samples")
+	assert.GreaterOrEqual(t, newObservations, 0, "Should have some observations")
+
+	// Total predictions should be first TPOT + sampled predictions
+	totalPredictionCalls := predictionCalls
+	sampledPredictions := totalPredictionCalls - firstTPOTPredictions
+
+	// New observations should equal sampled predictions (excluding token 2)
+	assert.Equal(t, newObservations, sampledPredictions,
+		"New observations should equal sampled predictions")
+
+	assert.Equal(t, num_output_tokens, reqCtx.GeneratedTokenCount, "Should track all generated tokens")
 }
 
 func TestRandomWeightedDraw(t *testing.T) {
