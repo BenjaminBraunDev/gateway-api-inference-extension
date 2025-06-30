@@ -46,6 +46,10 @@ spec:
     spec:
       # Conservatively, this timeout should mirror the longest grace period of the pods within the pool
       terminationGracePeriodSeconds: 130
+      volumes: # Added volumes section
+      - name: model-subsets-volume
+        configMap:
+          name: model-subsets-cm # Assumes a ConfigMap named 'model-subsets-cm' exists
       containers:
       - name: epp
         image: us-central1-docker.pkg.dev/k8s-staging-images/gateway-api-inference-extension/epp:main
@@ -63,11 +67,17 @@ spec:
         - "9002"
         - -grpcHealthPort
         - "9003"
+        - -modelSubsetsConfigFile # Added flag
+        - "/etc/epp/model-subsets-config.yaml" # Added path for the config file
         ports:
         - containerPort: 9002
         - containerPort: 9003
         - name: metrics
           containerPort: 9090
+        volumeMounts: # Added volumeMounts section
+        - name: model-subsets-volume
+          mountPath: /etc/epp # Mounts the ConfigMap content into /etc/epp
+          readOnly: true
         livenessProbe:
           grpc:
             port: 9003
