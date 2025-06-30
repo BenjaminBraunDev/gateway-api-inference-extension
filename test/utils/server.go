@@ -48,7 +48,7 @@ func PrepareForTestStreamingServer(models []*v1alpha2.InferenceModel, pods []*v1
 
 	pmc := &metrics.FakePodMetricsClient{}
 	pmf := metrics.NewPodMetricsFactory(pmc, time.Second)
-	ds := datastore.NewDatastore(ctx, pmf)
+	ds := datastore.NewDatastore(ctx, pmf, nil) // Added nil
 
 	initObjs := []client.Object{}
 	for _, model := range models {

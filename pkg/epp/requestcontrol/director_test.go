@@ -30,10 +30,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client" // Added
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
+	modelsubsetsconfig "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/config" // Added
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -56,9 +58,11 @@ func (m *mockSaturationDetector) IsSaturated(_ context.Context) bool {
 type mockScheduler struct {
 	scheduleResults *schedulingtypes.SchedulingResult
 	scheduleErr     error
+	CalledWithPods  []schedulingtypes.Pod // New field to store pods passed to Schedule
 }
 
-func (m *mockScheduler) Schedule(_ context.Context, _ *schedulingtypes.LLMRequest, _ []schedulingtypes.Pod) (*schedulingtypes.SchedulingResult, error) {
+func (m *mockScheduler) Schedule(_ context.Context, _ *schedulingtypes.LLMRequest, candidatePods []schedulingtypes.Pod) (*schedulingtypes.SchedulingResult, error) {
+	m.CalledWithPods = candidatePods // Store the pods
 	return m.scheduleResults, m.scheduleErr
 }
 
@@ -90,7 +94,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 
 	// Datastore setup
 	pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.FakePodMetricsClient{}, time.Second)
-	ds := datastore.NewDatastore(t.Context(), pmf)
+	ds := datastore.NewDatastore(t.Context(), pmf, nil) // Added nil
 	ds.ModelSetIfOlder(imFoodReview)
 	ds.ModelSetIfOlder(imFoodReviewResolve)
 	ds.ModelSetIfOlder(imFoodReviewSheddable)
@@ -498,7 +502,7 @@ func TestGetRandomPod(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.FakePodMetricsClient{}, time.Millisecond)
-			ds := datastore.NewDatastore(t.Context(), pmf)
+			ds := datastore.NewDatastore(t.Context(), pmf, nil) // Added nil
 			for _, pod := range test.storePods {
 				ds.PodUpdateOrAddIfNotExist(pod)
 			}
@@ -525,7 +529,10 @@ func TestDirector_HandleResponse(t *testing.T) {
 	}
 
 	ctx := logutil.NewTestLoggerIntoContext(context.Background())
-	ds := datastore.NewDatastore(t.Context(), nil)
+	// For pmf, using nil is okay if the datastore methods used by HandleResponse don't rely on it.
+	// Or, initialize a real one if specific datastore interactions are tested here.
+	// Given HandleResponse's current scope, a simple datastore might be enough.
+	ds := datastore.NewDatastore(t.Context(), nil, nil) // Added nil for modelSubsetsConfig
 	mockSched := &mockScheduler{}
 	director := NewDirectorWithConfig(ds, mockSched, nil, NewConfig().WithPostResponsePlugins(pr1))
 
@@ -571,3 +578,357 @@ func (p *testPostResponse) PostResponse(_ context.Context, _ *schedulingtypes.LL
 	p.lastRespOnResponse = response
 	p.lastTargetPodOnResponse = targetPod.NamespacedName.String()
 }
+
+// --- Start of tests for applyModelSubsetFilter ---
+func TestApplyModelSubsetFilter(t *testing.T) {
+	logger := logutil.NewTestLogger()
+	podMetrics := func(name string, labels map[string]string) backendmetrics.PodMetrics {
+		// Simulate what happens during PodMetrics creation: corev1.Pod -> backend.Pod
+		// The backend.Pod struct directly holds the labels.
+		bePod := &backend.Pod{
+			NamespacedName: types.NamespacedName{Name: name, Namespace: "default"},
+			Address:        "1.2.3.4", // Dummy address, not used by this filter
+			Labels:         labels,
+		}
+		return &backendmetrics.FakePodMetrics{ // Use the fake from backendmetrics
+			Pod:     bePod,
+			Metrics: &backendmetrics.MetricsState{},
+		}
+	}
+
+	allPods := []backendmetrics.PodMetrics{
+		podMetrics("pod1-group-a", map[string]string{"app": "nginx", "group": "a"}),
+		podMetrics("pod2-group-a", map[string]string{"app": "nginx", "group": "a", "version": "v1"}),
+		podMetrics("pod3-group-b", map[string]string{"app": "nginx", "group": "b"}),
+		podMetrics("pod4-no-group", map[string]string{"app": "nginx"}),
+		podMetrics("pod5-other-app", map[string]string{"app": "apache", "group": "a"}),
+	}
+
+	tests := []struct {
+		name          string
+		allPods       []backendmetrics.PodMetrics
+		selector      *modelsubsetsconfig.PodSelector
+		expectedNames []string // names of pods expected to be in the result
+	}{
+		{
+			name:    "select group a",
+			allPods: allPods,
+			selector: &modelsubsetsconfig.PodSelector{
+				MatchLabels: map[string]string{"group": "a"},
+			},
+			expectedNames: []string{"pod1-group-a", "pod2-group-a", "pod5-other-app"},
+		},
+		{
+			name:    "select group a and app nginx",
+			allPods: allPods,
+			selector: &modelsubsetsconfig.PodSelector{
+				MatchLabels: map[string]string{"group": "a", "app": "nginx"},
+			},
+			expectedNames: []string{"pod1-group-a", "pod2-group-a"},
+		},
+		{
+			name:    "select group b",
+			allPods: allPods,
+			selector: &modelsubsetsconfig.PodSelector{
+				MatchLabels: map[string]string{"group": "b"},
+			},
+			expectedNames: []string{"pod3-group-b"},
+		},
+		{
+			name:    "select by version v1 (only one pod)",
+			allPods: allPods,
+			selector: &modelsubsetsconfig.PodSelector{
+				MatchLabels: map[string]string{"version": "v1"},
+			},
+			expectedNames: []string{"pod2-group-a"},
+		},
+		{
+			name:    "selector matches nothing (non-existent label value)",
+			allPods: allPods,
+			selector: &modelsubsetsconfig.PodSelector{
+				MatchLabels: map[string]string{"group": "c"},
+			},
+			expectedNames: []string{},
+		},
+		{
+			name:    "selector matches nothing (non-existent label key)",
+			allPods: allPods,
+			selector: &modelsubsetsconfig.PodSelector{
+				MatchLabels: map[string]string{"tier": "backend"},
+			},
+			expectedNames: []string{},
+		},
+		{
+			name:    "empty matchLabels selector",
+			allPods: allPods,
+			selector: &modelsubsetsconfig.PodSelector{
+				MatchLabels: map[string]string{},
+			},
+			expectedNames: []string{"pod1-group-a", "pod2-group-a", "pod3-group-b", "pod4-no-group", "pod5-other-app"}, // returns all
+		},
+		{
+			name:          "nil matchLabels selector",
+			allPods:       allPods,
+			selector:      &modelsubsetsconfig.PodSelector{MatchLabels: nil},
+			expectedNames: []string{"pod1-group-a", "pod2-group-a", "pod3-group-b", "pod4-no-group", "pod5-other-app"}, // returns all
+		},
+		{
+			name:          "nil selector",
+			allPods:       allPods,
+			selector:      nil,
+			expectedNames: []string{"pod1-group-a", "pod2-group-a", "pod3-group-b", "pod4-no-group", "pod5-other-app"}, // returns all
+		},
+		{
+			name:          "empty input pods list",
+			allPods:       []backendmetrics.PodMetrics{},
+			selector:      &modelsubsetsconfig.PodSelector{MatchLabels: map[string]string{"group": "a"}},
+			expectedNames: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filtered := applyModelSubsetFilter(tt.allPods, tt.selector, logger)
+			var gotNames []string
+			for _, p := range filtered {
+				gotNames = append(gotNames, p.GetPod().NamespacedName.Name)
+			}
+			assert.ElementsMatch(t, tt.expectedNames, gotNames, "Filtered pod names do not match expected names")
+		})
+	}
+}
+
+// --- End of tests for applyModelSubsetFilter ---
+
+// --- Mock Datastore for Director tests ---
+type mockDirectorDatastore struct {
+	// Explicitly list fields needed for mocking specific behaviors for these tests
+	podsToReturn        []backendmetrics.PodMetrics
+	modelSubsetToReturn *modelsubsetsconfig.ModelSubset
+	hasModelSubset      bool
+	poolToReturn        *v1alpha2.InferencePool
+	poolError           error
+	modelToReturn       *v1alpha2.InferenceModel
+}
+
+// Ensure mockDirectorDatastore implements datastore.Datastore
+var _ datastore.Datastore = &mockDirectorDatastore{}
+
+func (m *mockDirectorDatastore) PodGetAll() []backendmetrics.PodMetrics {
+	return m.podsToReturn
+}
+
+func (m *mockDirectorDatastore) GetModelSubsetConfig(modelName string) (*modelsubsetsconfig.ModelSubset, bool) {
+	if m.modelSubsetToReturn != nil && m.modelSubsetToReturn.ModelName == modelName {
+		return m.modelSubsetToReturn, m.hasModelSubset
+	}
+	// Allow a wildcard modelName in the mock setup for tests that don't care about specific model matching
+	if m.modelSubsetToReturn != nil && m.modelSubsetToReturn.ModelName == "" && m.hasModelSubset {
+		return m.modelSubsetToReturn, m.hasModelSubset
+	}
+	return nil, false
+}
+
+func (m *mockDirectorDatastore) PoolGet() (*v1alpha2.InferencePool, error) {
+	return m.poolToReturn, m.poolError
+}
+
+func (m *mockDirectorDatastore) ModelGet(modelName string) *v1alpha2.InferenceModel {
+	if m.modelToReturn != nil && m.modelToReturn.Spec.ModelName == modelName {
+		return m.modelToReturn
+	}
+	// Default behavior for tests that might call ModelGet but don't care about a specific pre-set model
+	return &v1alpha2.InferenceModel{Spec: v1alpha2.InferenceModelSpec{ModelName: modelName, Criticality: func(c v1alpha2.Criticality) *v1alpha2.Criticality { return &c }(v1alpha2.Standard)}}
+}
+
+// Implement other Datastore interface methods with minimal logic (panic or return defaults)
+func (m *mockDirectorDatastore) PoolSet(ctx context.Context, client k8sclient.Client, pool *v1alpha2.InferencePool) error {
+	panic("PoolSet not implemented on mockDirectorDatastore")
+}
+func (m *mockDirectorDatastore) PoolHasSynced() bool {
+	return m.poolToReturn != nil // Simple mock: synced if pool is set
+}
+func (m *mockDirectorDatastore) PoolLabelsMatch(podLabels map[string]string) bool {
+	panic("PoolLabelsMatch not implemented on mockDirectorDatastore")
+}
+func (m *mockDirectorDatastore) ModelSetIfOlder(infModel *v1alpha2.InferenceModel) bool {
+	panic("ModelSetIfOlder not implemented on mockDirectorDatastore")
+}
+func (m *mockDirectorDatastore) ModelDelete(namespacedName types.NamespacedName) *v1alpha2.InferenceModel {
+	panic("ModelDelete not implemented on mockDirectorDatastore")
+}
+func (m *mockDirectorDatastore) ModelResync(ctx context.Context, client k8sclient.Client, modelName string) (bool, error) {
+	panic("ModelResync not implemented on mockDirectorDatastore")
+}
+func (m *mockDirectorDatastore) ModelGetAll() []*v1alpha2.InferenceModel {
+	if m.modelToReturn != nil {
+		return []*v1alpha2.InferenceModel{m.modelToReturn}
+	}
+	return []*v1alpha2.InferenceModel{}
+}
+func (m *mockDirectorDatastore) PodList(predicate func(backendmetrics.PodMetrics) bool) []backendmetrics.PodMetrics {
+	panic("PodList not implemented on mockDirectorDatastore")
+}
+func (m *mockDirectorDatastore) PodUpdateOrAddIfNotExist(pod *corev1.Pod) bool {
+	panic("PodUpdateOrAddIfNotExist not implemented on mockDirectorDatastore")
+}
+func (m *mockDirectorDatastore) PodDelete(namespacedName types.NamespacedName) {
+	panic("PodDelete not implemented on mockDirectorDatastore")
+}
+func (m *mockDirectorDatastore) Clear() {
+	panic("Clear not implemented on mockDirectorDatastore")
+}
+
+// --- Start of TestDirector_HandleRequest_ModelSubsetting ---
+func TestDirector_HandleRequest_ModelSubsetting(t *testing.T) {
+	ctx := logutil.NewTestLoggerIntoContext(context.Background())
+
+	// Helper to create PodMetrics with specific names and labels
+	makePodMetrics := func(name string, labels map[string]string) backendmetrics.PodMetrics {
+		// Simulate what happens during PodMetrics creation: corev1.Pod -> backend.Pod
+		// The backend.Pod struct directly holds the labels.
+		bePod := &backend.Pod{
+			NamespacedName: types.NamespacedName{Name: name, Namespace: "default"},
+			Address:        "1.2.3.4", // Dummy address
+			Labels:         labels,
+		}
+		return &backendmetrics.FakePodMetrics{ // Use the fake from backendmetrics
+			Pod:     bePod,
+			Metrics: &backendmetrics.MetricsState{},
+		}
+	}
+
+	allMockPods := []backendmetrics.PodMetrics{
+		makePodMetrics("pod-A1", map[string]string{"group": "A"}),
+		makePodMetrics("pod-A2", map[string]string{"group": "A"}),
+		makePodMetrics("pod-B1", map[string]string{"group": "B"}),
+	}
+
+	defaultPool := &v1alpha2.InferencePool{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-pool", Namespace: "default"},
+		Spec: v1alpha2.InferencePoolSpec{TargetPortNumber: 8000},
+	}
+
+	successfulScheduleResult := &schedulingtypes.SchedulingResult{
+		ProfileResults: map[string]*schedulingtypes.ProfileRunResult{"default": {
+			TargetPod: &schedulingtypes.ScoredPod{Pod: schedulingtypes.ToSchedulerPodMetrics(allMockPods)[0]}, // Just pick the first for mock
+		}},
+		PrimaryProfileName: "default",
+	}
+
+
+	tests := []struct {
+		name                    string
+		modelName               string
+		mockDatastore           *mockDirectorDatastore
+		mockScheduler           *mockScheduler
+		expectedSchedulerPodNames []string // Names of pods expected to be passed to scheduler
+		wantErrMsgContains      string   // Substring of expected error message
+	}{
+		{
+			name:      "model with subset A, scheduler sees only group A pods",
+			modelName: "modelX",
+			mockDatastore: &mockDirectorDatastore{
+				podsToReturn: allMockPods,
+				modelSubsetToReturn: &modelsubsetsconfig.ModelSubset{
+					ModelName:   "modelX",
+					PodSelector: &modelsubsetsconfig.PodSelector{MatchLabels: map[string]string{"group": "A"}},
+				},
+				hasModelSubset: true,
+				poolToReturn: defaultPool,
+				modelToReturn: &v1alpha2.InferenceModel{Spec: v1alpha2.InferenceModelSpec{ModelName: "modelX"}},
+			},
+			mockScheduler:           &mockScheduler{scheduleResults: successfulScheduleResult},
+			expectedSchedulerPodNames: []string{"pod-A1", "pod-A2"},
+		},
+		{
+			name:      "model with subset B, scheduler sees only group B pods",
+			modelName: "modelY",
+			mockDatastore: &mockDirectorDatastore{
+				podsToReturn: allMockPods,
+				modelSubsetToReturn: &modelsubsetsconfig.ModelSubset{
+					ModelName:   "modelY",
+					PodSelector: &modelsubsetsconfig.PodSelector{MatchLabels: map[string]string{"group": "B"}},
+				},
+				hasModelSubset: true,
+				poolToReturn: defaultPool,
+				modelToReturn: &v1alpha2.InferenceModel{Spec: v1alpha2.InferenceModelSpec{ModelName: "modelY"}},
+			},
+			mockScheduler:           &mockScheduler{scheduleResults: successfulScheduleResult},
+			expectedSchedulerPodNames: []string{"pod-B1"},
+		},
+		{
+			name:      "model with no specific subset, scheduler sees all pods",
+			modelName: "modelZ",
+			mockDatastore: &mockDirectorDatastore{ // GetModelSubsetConfig will return (nil, false)
+				podsToReturn: allMockPods,
+				hasModelSubset: false, // This ensures GetModelSubsetConfig returns false
+				poolToReturn: defaultPool,
+				modelToReturn: &v1alpha2.InferenceModel{Spec: v1alpha2.InferenceModelSpec{ModelName: "modelZ"}},
+			},
+			mockScheduler:           &mockScheduler{scheduleResults: successfulScheduleResult},
+			expectedSchedulerPodNames: []string{"pod-A1", "pod-A2", "pod-B1"},
+		},
+		{
+			name:      "model with subset matching no pods, error before scheduling",
+			modelName: "modelW",
+			mockDatastore: &mockDirectorDatastore{
+				podsToReturn: allMockPods,
+				modelSubsetToReturn: &modelsubsetsconfig.ModelSubset{
+					ModelName:   "modelW",
+					PodSelector: &modelsubsetsconfig.PodSelector{MatchLabels: map[string]string{"group": "C"}}, // No pod has group C
+				},
+				hasModelSubset: true,
+				poolToReturn: defaultPool,
+				modelToReturn: &v1alpha2.InferenceModel{Spec: v1alpha2.InferenceModelSpec{ModelName: "modelW"}},
+			},
+			mockScheduler:      &mockScheduler{}, // Scheduler won't be called
+			wantErrMsgContains: "no pods available for model modelW with specified subset criteria",
+		},
+		{
+			name:      "no pods in pool, no subset defined, error before scheduling",
+			modelName: "modelV",
+			mockDatastore: &mockDirectorDatastore{
+				podsToReturn: []backendmetrics.PodMetrics{}, // No pods at all
+				hasModelSubset: false,
+				poolToReturn: defaultPool,
+				modelToReturn: &v1alpha2.InferenceModel{Spec: v1alpha2.InferenceModelSpec{ModelName: "modelV"}},
+			},
+			mockScheduler:      &mockScheduler{},
+			wantErrMsgContains: "no pods available in pool for model modelV",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Ensure the mockScheduler for this test iteration is clean for capturing CalledWithPods
+			currentMockScheduler := &mockScheduler{
+				scheduleResults: tt.mockScheduler.scheduleResults, // Preserve scheduled results/error if needed by test logic
+				scheduleErr:     tt.mockScheduler.scheduleErr,
+			}
+
+			director := NewDirectorWithConfig(tt.mockDatastore, currentMockScheduler, &mockSaturationDetector{isSaturated: false}, NewConfig())
+			reqCtx := &handlers.RequestContext{
+				Request: &handlers.Request{
+					Body:    map[string]interface{}{"model": tt.modelName, "prompt": "test"},
+					Headers: map[string]string{requtil.RequestIdHeaderKey: "test-id"},
+				},
+			}
+
+			_, err := director.HandleRequest(ctx, reqCtx)
+
+			if tt.wantErrMsgContains != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErrMsgContains)
+			} else {
+				assert.NoError(t, err)
+				var schedulerCalledWithPodNames []string
+				for _, p := range currentMockScheduler.CalledWithPods {
+					schedulerCalledWithPodNames = append(schedulerCalledWithPodNames, p.GetPod().NamespacedName.Name)
+				}
+				assert.ElementsMatch(t, tt.expectedSchedulerPodNames, schedulerCalledWithPodNames, "Scheduler was called with incorrect set of pod names")
+			}
+		})
+	}
+}
+// --- End of TestDirector_HandleRequest_ModelSubsetting ---

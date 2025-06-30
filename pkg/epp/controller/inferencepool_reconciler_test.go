@@ -95,7 +95,7 @@ func TestInferencePoolReconciler(t *testing.T) {
 	ctx := context.Background()
 
 	pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.FakePodMetricsClient{}, time.Second)
-	datastore := datastore.NewDatastore(ctx, pmf)
+	datastore := datastore.NewDatastore(ctx, pmf, nil) // Added nil
 	inferencePoolReconciler := &InferencePoolReconciler{Client: fakeClient, Datastore: datastore}
 
 	// Step 1: Inception, only ready pods matching pool1 are added to the store.

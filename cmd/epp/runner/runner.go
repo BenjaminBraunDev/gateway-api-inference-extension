@@ -26,8 +26,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	uberzap "go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"os" // Added for reading file
+
 	"google.golang.org/grpc"
 	healthPb "google.golang.org/grpc/health/grpc_health_v1"
+	"gopkg.in/yaml.v2" // Added for YAML parsing
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -37,6 +40,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	conformance_epp "sigs.k8s.io/gateway-api-inference-extension/conformance/testing-epp"
+	modelsubsetsconfig "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/config" // Added for model subset config structs
 	"sigs.k8s.io/gateway-api-inference-extension/internal/runnable"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/common/config/loader"
@@ -115,6 +119,7 @@ var (
 	// configuration flags
 	configFile = flag.String("configFile", "", "The path to the configuration file")
 	configText = flag.String("configText", "", "The configuration specified as text, in lieu of a file")
+	modelSubsetsConfigFile = flag.String("modelSubsetsConfigFile", "", "The path to the model subsets configuration YAML file.") // Added new flag
 
 	setupLog = ctrl.Log.WithName("setup")
 
@@ -178,7 +183,31 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
+	// --- Load Model Subsets Configuration ---
+	var modelSubsetCfg *modelsubsetsconfig.ModelSubsetMapping
+	if *modelSubsetsConfigFile != "" {
+		setupLog.Info("Loading model subsets configuration from file", "path", *modelSubsetsConfigFile)
+		yamlFile, err := os.ReadFile(*modelSubsetsConfigFile)
+		if err != nil {
+			setupLog.Error(err, "Failed to read model subsets config file")
+			return fmt.Errorf("failed to read model subsets config file %s: %w", *modelSubsetsConfigFile, err)
+		}
+		// Initialize to ensure modelSubsetCfg is not nil even if Unmarshal fails or file is empty
+		modelSubsetCfg = &modelsubsetsconfig.ModelSubsetMapping{}
+		err = yaml.Unmarshal(yamlFile, &modelSubsetCfg)
+		if err != nil {
+			setupLog.Error(err, "Failed to unmarshal model subsets config YAML")
+			return fmt.Errorf("failed to unmarshal model subsets config YAML from %s: %w", *modelSubsetsConfigFile, err)
+		}
+		setupLog.Info("Model subsets configuration loaded successfully", "numMappings", len(modelSubsetCfg.ModelSubsets))
+	} else {
+		setupLog.Info("No model subsets configuration file provided.")
+		// Initialize with an empty config if no file is provided
+		modelSubsetCfg = &modelsubsetsconfig.ModelSubsetMapping{ModelSubsets: []modelsubsetsconfig.ModelSubset{}}
+	}
+
 	// --- Setup Datastore ---
+	// TODO: Modify NewDatastore to accept modelSubsetCfg
 	mapping, err := backendmetrics.NewMetricMapping(
 		*totalQueuedRequestsMetric,
 		*kvCacheUsagePercentageMetric,
@@ -191,7 +220,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	verifyMetricMapping(*mapping, setupLog)
 	pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.PodMetricsClientImpl{MetricMapping: mapping}, *refreshMetricsInterval)
 
-	datastore := datastore.NewDatastore(ctx, pmf)
+	datastore := datastore.NewDatastore(ctx, pmf, modelSubsetCfg) // Pass loaded config
 
 	// --- Setup Metrics Server ---
 	customCollectors := []prometheus.Collector{collectors.NewInferencePoolMetricsCollector(datastore)}

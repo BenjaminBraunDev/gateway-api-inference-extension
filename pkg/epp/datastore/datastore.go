@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
+	modelsubsetsconfig "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/config" // Added for model subset config
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 	podutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/pod"
 )
@@ -59,6 +60,7 @@ type Datastore interface {
 	ModelDelete(namespacedName types.NamespacedName) *v1alpha2.InferenceModel
 	ModelResync(ctx context.Context, ctrlClient client.Client, modelName string) (bool, error)
 	ModelGetAll() []*v1alpha2.InferenceModel
+	GetModelSubsetConfig(modelName string) (*modelsubsetsconfig.ModelSubset, bool) // New method
 
 	// PodMetrics operations
 	// PodGetAll returns all pods and metrics, including fresh and stale.
@@ -72,13 +74,26 @@ type Datastore interface {
 	Clear()
 }
 
-func NewDatastore(parentCtx context.Context, pmf *backendmetrics.PodMetricsFactory) Datastore {
+func NewDatastore(parentCtx context.Context, pmf *backendmetrics.PodMetricsFactory, modelSubsetsConfig *modelsubsetsconfig.ModelSubsetMapping) Datastore {
+	// Prepare a quick lookup map for model subsets
+	modelToSubsetMap := make(map[string]*modelsubsetsconfig.ModelSubset)
+	if modelSubsetsConfig != nil {
+		for i := range modelSubsetsConfig.ModelSubsets {
+			// Store a pointer to the ModelSubset from the slice to avoid copying
+			// and ensure modifications (if any were allowed) reflect everywhere.
+			// For this use case, it's primarily for read access.
+			subset := modelSubsetsConfig.ModelSubsets[i]
+			modelToSubsetMap[subset.ModelName] = &subset
+		}
+	}
+
 	store := &datastore{
-		parentCtx:       parentCtx,
-		poolAndModelsMu: sync.RWMutex{},
-		models:          make(map[string]*v1alpha2.InferenceModel),
-		pods:            &sync.Map{},
-		pmf:             pmf,
+		parentCtx:          parentCtx,
+		poolAndModelsMu:    sync.RWMutex{},
+		models:             make(map[string]*v1alpha2.InferenceModel),
+		pods:               &sync.Map{},
+		pmf:                pmf,
+		modelSubsetsConfig: modelToSubsetMap, // Store the processed map
 	}
 	return store
 }
@@ -94,6 +109,10 @@ type datastore struct {
 	// key: types.NamespacedName, value: backendmetrics.PodMetrics
 	pods *sync.Map
 	pmf  *backendmetrics.PodMetricsFactory
+
+	// modelSubsetsConfig holds the parsed model-to-subset mapping.
+	// Key: modelName, Value: pointer to ModelSubset config.
+	modelSubsetsConfig map[string]*modelsubsetsconfig.ModelSubset
 }
 
 func (ds *datastore) Clear() {
@@ -335,4 +354,11 @@ func stripLabelKeyAliasFromLabelMap(labels map[v1alpha2.LabelKey]v1alpha2.LabelV
 		outMap[string(k)] = string(v)
 	}
 	return outMap
+}
+
+func (ds *datastore) GetModelSubsetConfig(modelName string) (*modelsubsetsconfig.ModelSubset, bool) {
+	ds.poolAndModelsMu.RLock() // Protects access to modelSubsetsConfig if it were to be modified dynamically, good practice.
+	defer ds.poolAndModelsMu.RUnlock()
+	config, found := ds.modelSubsetsConfig[modelName]
+	return config, found
 }

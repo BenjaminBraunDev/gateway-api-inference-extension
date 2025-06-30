@@ -1017,7 +1017,7 @@ func BeforeSuite() func() {
 	pmf := backendmetrics.NewPodMetricsFactory(serverRunner.TestPodMetricsClient, 10*time.Millisecond)
 	// Adjust from defaults
 	serverRunner.PoolNamespacedName = types.NamespacedName{Name: testPoolName, Namespace: testNamespace}
-	serverRunner.Datastore = datastore.NewDatastore(context.Background(), pmf)
+	serverRunner.Datastore = datastore.NewDatastore(context.Background(), pmf, nil) // Added nil
 	scheduler := scheduling.NewScheduler()
 
 	sdConfig := &saturationdetector.Config{

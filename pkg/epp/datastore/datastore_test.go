@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
+	modelsubsetsconfig "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/config" // Added
 	testutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/testing"
 )
 
@@ -81,7 +82,7 @@ func TestPool(t *testing.T) {
 				WithScheme(scheme).
 				Build()
 			pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.FakePodMetricsClient{}, time.Second)
-			datastore := NewDatastore(context.Background(), pmf)
+			datastore := NewDatastore(context.Background(), pmf, nil) // Added nil
 			_ = datastore.PoolSet(context.Background(), fakeClient, tt.inferencePool)
 			gotPool, gotErr := datastore.PoolGet()
 			if diff := cmp.Diff(tt.wantErr, gotErr, cmpopts.EquateErrors()); diff != "" {
@@ -99,6 +100,82 @@ func TestPool(t *testing.T) {
 				if diff := cmp.Diff(tt.wantLabelsMatch, gotLabelsMatch); diff != "" {
 					t.Errorf("Unexpected labels match diff (+got/-want): %s", diff)
 				}
+			}
+		})
+	}
+}
+
+func TestGetModelSubsetConfig(t *testing.T) {
+	modelASubset := &modelsubsetsconfig.ModelSubset{
+		ModelName: "model-a",
+		PodSelector: &modelsubsetsconfig.PodSelector{
+			MatchLabels: map[string]string{"topology": "a"},
+		},
+	}
+	modelBSubset := &modelsubsetsconfig.ModelSubset{
+		ModelName: "model-b",
+		PodSelector: &modelsubsetsconfig.PodSelector{
+			MatchLabels: map[string]string{"topology": "b"},
+		},
+	}
+
+	fullConfig := &modelsubsetsconfig.ModelSubsetMapping{
+		ModelSubsets: []modelsubsetsconfig.ModelSubset{*modelASubset, *modelBSubset},
+	}
+	emptyConfig := &modelsubsetsconfig.ModelSubsetMapping{
+		ModelSubsets: []modelsubsetsconfig.ModelSubset{},
+	}
+	nilConfig := (*modelsubsetsconfig.ModelSubsetMapping)(nil)
+
+	tests := []struct {
+		name               string
+		modelSubsetsConfig *modelsubsetsconfig.ModelSubsetMapping
+		modelName          string
+		wantSubset         *modelsubsetsconfig.ModelSubset
+		wantFound          bool
+	}{
+		{
+			name:               "model found in full config",
+			modelSubsetsConfig: fullConfig,
+			modelName:          "model-a",
+			wantSubset:         modelASubset,
+			wantFound:          true,
+		},
+		{
+			name:               "model not found in full config",
+			modelSubsetsConfig: fullConfig,
+			modelName:          "model-c",
+			wantSubset:         nil,
+			wantFound:          false,
+		},
+		{
+			name:               "model search in empty config",
+			modelSubsetsConfig: emptyConfig,
+			modelName:          "model-a",
+			wantSubset:         nil,
+			wantFound:          false,
+		},
+		{
+			name:               "model search in nil config",
+			modelSubsetsConfig: nilConfig, // Explicitly test nil, constructor makes empty map if nil
+			modelName:          "model-a",
+			wantSubset:         nil,
+			wantFound:          false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.FakePodMetricsClient{}, time.Second)
+			ds := NewDatastore(context.Background(), pmf, tt.modelSubsetsConfig)
+
+			gotSubset, gotFound := ds.GetModelSubsetConfig(tt.modelName)
+
+			if gotFound != tt.wantFound {
+				t.Errorf("GetModelSubsetConfig() gotFound = %v, want %v", gotFound, tt.wantFound)
+			}
+			if diff := cmp.Diff(tt.wantSubset, gotSubset); diff != "" {
+				t.Errorf("GetModelSubsetConfig() subset mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -213,7 +290,7 @@ func TestModel(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.FakePodMetricsClient{}, time.Second)
-			ds := NewDatastore(t.Context(), pmf)
+			ds := NewDatastore(t.Context(), pmf, nil) // Added nil
 			for _, m := range test.existingModels {
 				ds.ModelSetIfOlder(m)
 			}
@@ -336,7 +413,7 @@ func TestMetrics(t *testing.T) {
 				WithScheme(scheme).
 				Build()
 			pmf := backendmetrics.NewPodMetricsFactory(test.pmc, time.Millisecond)
-			ds := NewDatastore(ctx, pmf)
+			ds := NewDatastore(ctx, pmf, nil) // Added nil
 			_ = ds.PoolSet(ctx, fakeClient, inferencePool)
 			for _, pod := range test.storePods {
 				ds.PodUpdateOrAddIfNotExist(pod)
@@ -429,7 +506,7 @@ func TestPods(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
 			pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.FakePodMetricsClient{}, time.Second)
-			ds := NewDatastore(t.Context(), pmf)
+			ds := NewDatastore(t.Context(), pmf, nil) // Added nil
 			for _, pod := range test.existingPods {
 				ds.PodUpdateOrAddIfNotExist(pod)
 			}

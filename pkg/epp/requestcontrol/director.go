@@ -30,6 +30,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
+	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics" // Added
+	modelsubsetsconfig "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/config"    // Added
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
@@ -136,13 +138,44 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	}
 
 	// --- 3. Call Scheduler ---
-	// Snapshot pod metrics from the datastore to:
-	// 1. Reduce concurrent access to the datastore.
-	// 2. Ensure consistent data during the scheduling operation of a request between all scheduling cycles.
-	candidatePods := schedulingtypes.ToSchedulerPodMetrics(d.datastore.PodGetAll())
-	results, err := d.scheduler.Schedule(ctx, reqCtx.SchedulingRequest, candidatePods)
+	// Snapshot pod metrics from the datastore.
+	allPoolPodsPM := d.datastore.PodGetAll() // []backendmetrics.PodMetrics
+
+	// Check for and apply model-specific subset filtering.
+	// The GetModelSubsetConfig method is assumed to be added to the Datastore interface and implementation.
+	var schedulerCandidatePods []schedulingtypes.Pod
+	modelSubsetConfig, hasModelSubset := d.datastore.GetModelSubsetConfig(reqCtx.SchedulingRequest.TargetModel)
+
+	if hasModelSubset && modelSubsetConfig.PodSelector != nil {
+		logger.V(logutil.DEBUG).Info("Applying model-specific subset filter", "model", reqCtx.SchedulingRequest.TargetModel, "selector", modelSubsetConfig.PodSelector.MatchLabels)
+		filteredPoolPodsPM := applyModelSubsetFilter(allPoolPodsPM, modelSubsetConfig.PodSelector, logger)
+		schedulerCandidatePods = schedulingtypes.ToSchedulerPodMetrics(filteredPoolPodsPM)
+		if len(schedulerCandidatePods) == 0 {
+			logger.V(logutil.DEFAULT).Info("Model-specific subset filter resulted in zero candidate pods", "model", reqCtx.SchedulingRequest.TargetModel, "selector", modelSubsetConfig.PodSelector.MatchLabels)
+			// Return error early if no pods match the mandatory model-specific subset
+			return reqCtx, errutil.Error{Code: errutil.InferencePoolResourceExhausted, Msg: fmt.Sprintf("no pods available for model %s with specified subset criteria", reqCtx.SchedulingRequest.TargetModel)}
+		}
+	} else {
+		if hasModelSubset && modelSubsetConfig.PodSelector == nil {
+			logger.V(logutil.DEBUG).Info("Model-specific subset found but PodSelector is nil, using all pool pods for scheduling", "model", reqCtx.SchedulingRequest.TargetModel)
+		} else {
+			logger.V(logutil.DEBUG).Info("No model-specific subset found or selector not specified, using all pool pods for scheduling", "model", reqCtx.SchedulingRequest.TargetModel)
+		}
+		schedulerCandidatePods = schedulingtypes.ToSchedulerPodMetrics(allPoolPodsPM)
+	}
+
+	if len(schedulerCandidatePods) == 0 && !(hasModelSubset && modelSubsetConfig.PodSelector != nil) {
+		// This case means allPoolPodsPM was empty to begin with, and no model-specific filter was applied to cause this.
+		logger.V(logutil.DEFAULT).Info("No candidate pods available in the pool before scheduling", "model", reqCtx.SchedulingRequest.TargetModel)
+		return reqCtx, errutil.Error{Code: errutil.InferencePoolResourceExhausted, Msg: fmt.Sprintf("no pods available in pool for model %s", reqCtx.SchedulingRequest.TargetModel)}
+	}
+
+
+	// Ensure consistent data during the scheduling operation of a request between all scheduling cycles.
+	results, err := d.scheduler.Schedule(ctx, reqCtx.SchedulingRequest, schedulerCandidatePods)
 	if err != nil {
-		return reqCtx, errutil.Error{Code: errutil.InferencePoolResourceExhausted, Msg: fmt.Errorf("failed to find target pod: %w", err).Error()}
+		// The error message now includes context if model subsetting might have led to no pods.
+		return reqCtx, errutil.Error{Code: errutil.InferencePoolResourceExhausted, Msg: fmt.Errorf("failed to find target pod for model %s (model subsetting may apply): %w", reqCtx.SchedulingRequest.TargetModel, err).Error()}
 	}
 
 	// --- 4. Prepare Request (Populates RequestContext and call PreRequest plugins) ---
@@ -273,4 +306,37 @@ func (d *Director) runPostResponsePlugins(ctx context.Context, request *scheduli
 		plugin.PostResponse(ctx, request, response, targetPod)
 		metrics.RecordRequestControlPluginProcessingLatency(PostResponsePluginType, plugin.Type(), time.Since(before))
 	}
+}
+
+// applyModelSubsetFilter filters a list of all available pod metrics based on the provided selector.
+// Currently, it only supports filtering by `matchLabels`.
+func applyModelSubsetFilter(allPods []backendmetrics.PodMetrics, selector *modelsubsetsconfig.PodSelector, logger logr.Logger) []backendmetrics.PodMetrics {
+	if selector == nil || selector.MatchLabels == nil || len(selector.MatchLabels) == 0 {
+		logger.V(logutil.DEBUG).Info("No valid selector provided for model subset filtering; returning all pods.")
+		return allPods
+	}
+
+	var filteredPods []backendmetrics.PodMetrics
+	for _, podMetrics := range allPods {
+		bePod := podMetrics.GetPod() // Get the backend.Pod
+		if bePod == nil {
+			logger.V(logutil.TRACE).Info("backend.Pod is nil from PodMetrics, skipping for model subset filtering")
+			continue
+		}
+
+		matches := true
+		for key, value := range selector.MatchLabels {
+			podLabelValue, found := bePod.Labels[key] // Access labels from backend.Pod.Labels
+			if !found || podLabelValue != value {
+				matches = false
+				break
+			}
+		}
+
+		if matches {
+			filteredPods = append(filteredPods, podMetrics)
+		}
+	}
+	logger.V(logutil.DEBUG).Info("Model subset filter applied", "selector", selector.MatchLabels, "inputCount", len(allPods), "outputCount", len(filteredPods))
+	return filteredPods
 }

@@ -49,7 +49,7 @@ var (
 
 func TestNoMetricsCollected(t *testing.T) {
 	pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.FakePodMetricsClient{}, time.Second)
-	datastore := datastore.NewDatastore(context.Background(), pmf)
+	datastore := datastore.NewDatastore(context.Background(), pmf, nil) // Added nil
 
 	collector := &inferencePoolMetricsCollector{
 		ds: datastore,
@@ -67,7 +67,7 @@ func TestMetricsCollected(t *testing.T) {
 		},
 	}
 	pmf := backendmetrics.NewPodMetricsFactory(pmc, time.Millisecond)
-	ds := datastore.NewDatastore(context.Background(), pmf)
+	ds := datastore.NewDatastore(context.Background(), pmf, nil) // Added nil
 
 	scheme := runtime.NewScheme()
 	fakeClient := fake.NewClientBuilder().
