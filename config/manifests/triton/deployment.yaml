@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: triton-server
-        image: nvcr.io/nvidia/tritonserver:25.03-trtllm-python-py3  # Base Triton image
+        image: nvcr.io/nvidia/tritonserver:25.06-trtllm-python-py3  # Base Triton image
         imagePullPolicy: IfNotPresent
         command: ["/bin/bash", "-c"]
         args:
@@ -34,21 +34,21 @@ spec:
             pip install pillow
             
             # Use launch_triton_server.py
-            # python3 /models/tensorrtllm_backend/scripts/launch_triton_server.py --world_size 1 --model_repo /models/tensorrtllm_backend/llama_ifb
-            # tail -f /dev/null
+            python3 /models/tensorrtllm_backend/tensorrt_llm/triton_backend/scripts/launch_triton_server.py --world_size 1 --model_repo /models/tensorrtllm_backend/llama_ifb
+            tail -f /dev/null
 
             # Launch OpenAI completetions endpoint
             # Install python bindings for tritonserver and tritonfrontend
-            pip install /opt/tritonserver/python/triton*.whl
+            # pip install /opt/tritonserver/python/triton*.whl
             # Install application requirements
-            git clone --depth 1 --branch v2.56.0 https://github.com/triton-inference-server/server.git
-            cd server/python/openai/
-            pip install -r requirements.txt
-            pip install uvicorn
-            pip install -U huggingface_hub
-            huggingface-cli login --token $(cat /secrets/huggingface/token) --add-to-git-credential
+            # git clone --depth 1 --branch v2.59.0 https://github.com/triton-inference-server/server.git
+            # cd server/python/openai/
+            # pip install -r requirements.txt
+            # pip install uvicorn
+            # pip install -U huggingface_hub
+            # huggingface-cli login --token $(cat /secrets/huggingface/token) --add-to-git-credential
           
-            python3 openai_frontend/main.py --model-repository /models/tensorrtllm_backend/llama_ifb --tokenizer meta-llama/Llama-2-7b-chat-hf
+            # python3 openai_frontend/main.py --model-repository /models/tensorrtllm_backend/llama_ifb --tokenizer meta-llama/Llama-2-7b-chat-hf
         ports:
         - containerPort: 9000
           name: http
