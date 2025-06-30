@@ -31,7 +31,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics" // Added
-	modelsubsetsconfig "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/config"    // Added
+	modelsubsetsconfig "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/config"      // Added
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
@@ -169,7 +169,6 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 		logger.V(logutil.DEFAULT).Info("No candidate pods available in the pool before scheduling", "model", reqCtx.SchedulingRequest.TargetModel)
 		return reqCtx, errutil.Error{Code: errutil.InferencePoolResourceExhausted, Msg: fmt.Sprintf("no pods available in pool for model %s", reqCtx.SchedulingRequest.TargetModel)}
 	}
-
 
 	// Ensure consistent data during the scheduling operation of a request between all scheduling cycles.
 	results, err := d.scheduler.Schedule(ctx, reqCtx.SchedulingRequest, schedulerCandidatePods)

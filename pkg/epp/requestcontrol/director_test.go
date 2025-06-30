@@ -806,7 +806,7 @@ func TestDirector_HandleRequest_ModelSubsetting(t *testing.T) {
 
 	defaultPool := &v1alpha2.InferencePool{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-pool", Namespace: "default"},
-		Spec: v1alpha2.InferencePoolSpec{TargetPortNumber: 8000},
+		Spec:       v1alpha2.InferencePoolSpec{TargetPortNumber: 8000},
 	}
 
 	successfulScheduleResult := &schedulingtypes.SchedulingResult{
@@ -816,14 +816,13 @@ func TestDirector_HandleRequest_ModelSubsetting(t *testing.T) {
 		PrimaryProfileName: "default",
 	}
 
-
 	tests := []struct {
-		name                    string
-		modelName               string
-		mockDatastore           *mockDirectorDatastore
-		mockScheduler           *mockScheduler
+		name                      string
+		modelName                 string
+		mockDatastore             *mockDirectorDatastore
+		mockScheduler             *mockScheduler
 		expectedSchedulerPodNames []string // Names of pods expected to be passed to scheduler
-		wantErrMsgContains      string   // Substring of expected error message
+		wantErrMsgContains        string   // Substring of expected error message
 	}{
 		{
 			name:      "model with subset A, scheduler sees only group A pods",
@@ -835,10 +834,10 @@ func TestDirector_HandleRequest_ModelSubsetting(t *testing.T) {
 					PodSelector: &modelsubsetsconfig.PodSelector{MatchLabels: map[string]string{"group": "A"}},
 				},
 				hasModelSubset: true,
-				poolToReturn: defaultPool,
-				modelToReturn: &v1alpha2.InferenceModel{Spec: v1alpha2.InferenceModelSpec{ModelName: "modelX"}},
+				poolToReturn:   defaultPool,
+				modelToReturn:  &v1alpha2.InferenceModel{Spec: v1alpha2.InferenceModelSpec{ModelName: "modelX"}},
 			},
-			mockScheduler:           &mockScheduler{scheduleResults: successfulScheduleResult},
+			mockScheduler:             &mockScheduler{scheduleResults: successfulScheduleResult},
 			expectedSchedulerPodNames: []string{"pod-A1", "pod-A2"},
 		},
 		{
@@ -851,22 +850,22 @@ func TestDirector_HandleRequest_ModelSubsetting(t *testing.T) {
 					PodSelector: &modelsubsetsconfig.PodSelector{MatchLabels: map[string]string{"group": "B"}},
 				},
 				hasModelSubset: true,
-				poolToReturn: defaultPool,
-				modelToReturn: &v1alpha2.InferenceModel{Spec: v1alpha2.InferenceModelSpec{ModelName: "modelY"}},
+				poolToReturn:   defaultPool,
+				modelToReturn:  &v1alpha2.InferenceModel{Spec: v1alpha2.InferenceModelSpec{ModelName: "modelY"}},
 			},
-			mockScheduler:           &mockScheduler{scheduleResults: successfulScheduleResult},
+			mockScheduler:             &mockScheduler{scheduleResults: successfulScheduleResult},
 			expectedSchedulerPodNames: []string{"pod-B1"},
 		},
 		{
 			name:      "model with no specific subset, scheduler sees all pods",
 			modelName: "modelZ",
 			mockDatastore: &mockDirectorDatastore{ // GetModelSubsetConfig will return (nil, false)
-				podsToReturn: allMockPods,
+				podsToReturn:   allMockPods,
 				hasModelSubset: false, // This ensures GetModelSubsetConfig returns false
-				poolToReturn: defaultPool,
-				modelToReturn: &v1alpha2.InferenceModel{Spec: v1alpha2.InferenceModelSpec{ModelName: "modelZ"}},
+				poolToReturn:   defaultPool,
+				modelToReturn:  &v1alpha2.InferenceModel{Spec: v1alpha2.InferenceModelSpec{ModelName: "modelZ"}},
 			},
-			mockScheduler:           &mockScheduler{scheduleResults: successfulScheduleResult},
+			mockScheduler:             &mockScheduler{scheduleResults: successfulScheduleResult},
 			expectedSchedulerPodNames: []string{"pod-A1", "pod-A2", "pod-B1"},
 		},
 		{
@@ -879,8 +878,8 @@ func TestDirector_HandleRequest_ModelSubsetting(t *testing.T) {
 					PodSelector: &modelsubsetsconfig.PodSelector{MatchLabels: map[string]string{"group": "C"}}, // No pod has group C
 				},
 				hasModelSubset: true,
-				poolToReturn: defaultPool,
-				modelToReturn: &v1alpha2.InferenceModel{Spec: v1alpha2.InferenceModelSpec{ModelName: "modelW"}},
+				poolToReturn:   defaultPool,
+				modelToReturn:  &v1alpha2.InferenceModel{Spec: v1alpha2.InferenceModelSpec{ModelName: "modelW"}},
 			},
 			mockScheduler:      &mockScheduler{}, // Scheduler won't be called
 			wantErrMsgContains: "no pods available for model modelW with specified subset criteria",
@@ -889,10 +888,10 @@ func TestDirector_HandleRequest_ModelSubsetting(t *testing.T) {
 			name:      "no pods in pool, no subset defined, error before scheduling",
 			modelName: "modelV",
 			mockDatastore: &mockDirectorDatastore{
-				podsToReturn: []backendmetrics.PodMetrics{}, // No pods at all
+				podsToReturn:   []backendmetrics.PodMetrics{}, // No pods at all
 				hasModelSubset: false,
-				poolToReturn: defaultPool,
-				modelToReturn: &v1alpha2.InferenceModel{Spec: v1alpha2.InferenceModelSpec{ModelName: "modelV"}},
+				poolToReturn:   defaultPool,
+				modelToReturn:  &v1alpha2.InferenceModel{Spec: v1alpha2.InferenceModelSpec{ModelName: "modelV"}},
 			},
 			mockScheduler:      &mockScheduler{},
 			wantErrMsgContains: "no pods available in pool for model modelV",
@@ -931,4 +930,5 @@ func TestDirector_HandleRequest_ModelSubsetting(t *testing.T) {
 		})
 	}
 }
+
 // --- End of TestDirector_HandleRequest_ModelSubsetting ---

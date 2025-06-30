@@ -40,10 +40,10 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	conformance_epp "sigs.k8s.io/gateway-api-inference-extension/conformance/testing-epp"
-	modelsubsetsconfig "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/config" // Added for model subset config structs
 	"sigs.k8s.io/gateway-api-inference-extension/internal/runnable"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/common/config/loader"
+	modelsubsetsconfig "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/config" // Added for model subset config structs
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics/collectors"
@@ -117,8 +117,8 @@ var (
 		"vllm:lora_requests_info",
 		"Prometheus metric for the LoRA info metrics (must be in vLLM label format).")
 	// configuration flags
-	configFile = flag.String("configFile", "", "The path to the configuration file")
-	configText = flag.String("configText", "", "The configuration specified as text, in lieu of a file")
+	configFile             = flag.String("configFile", "", "The path to the configuration file")
+	configText             = flag.String("configText", "", "The configuration specified as text, in lieu of a file")
 	modelSubsetsConfigFile = flag.String("modelSubsetsConfigFile", "", "The path to the model subsets configuration YAML file.") // Added new flag
 
 	setupLog = ctrl.Log.WithName("setup")

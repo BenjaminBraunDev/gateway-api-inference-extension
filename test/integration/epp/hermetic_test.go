@@ -823,7 +823,7 @@ func TestFullDuplexStreamed_KubeInferenceModelRequest(t *testing.T) {
 							Status: &envoyTypePb.HttpStatus{
 								Code: envoyTypePb.StatusCode_TooManyRequests,
 							},
-							Body: []byte("inference gateway: InferencePoolResourceExhausted - failed to find target pod: failed to run scheduler profile 'default'"),
+							Body: []byte(fmt.Sprintf("inference gateway: InferencePoolResourceExhausted - failed to find target pod for model %s (model subsetting may apply): failed to run scheduler profile 'default'", modelSQLLoraTarget)),
 						},
 					},
 				},
