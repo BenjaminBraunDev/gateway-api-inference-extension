@@ -50,11 +50,11 @@ spec:
           
             # python3 openai_frontend/main.py --model-repository /models/tensorrtllm_backend/llama_ifb --tokenizer meta-llama/Llama-2-7b-chat-hf
         ports:
-        - containerPort: 9000
+        - containerPort: 8000
           name: http
-        - containerPort: 9001
+        - containerPort: 8001
           name: grpc
-        - containerPort: 9002
+        - containerPort: 8002
           name: metrics
         volumeMounts:
         - mountPath: /models
@@ -87,13 +87,13 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - port: 9000
+    - port: 8000
       targetPort: http
       name: http-inference-server
-    - port: 9001
+    - port: 8001
       targetPort: grpc
       name: grpc-inference-server
-    - port: 9002
+    - port: 8002
       targetPort: metrics
       name: http-metrics
   selector:
