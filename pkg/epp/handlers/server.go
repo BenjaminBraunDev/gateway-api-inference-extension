@@ -80,6 +80,7 @@ type StreamingServer struct {
 	director                                 Director
 }
 
+
 // RequestContext stores context information during the life time of an HTTP request.
 // TODO: The requestContext is gathering a ton of fields. A future refactor needs to tease these fields apart.
 // Specifically, there are fields related to the ext-proc protocol, and then fields related to the lifecycle of the request.
@@ -101,6 +102,7 @@ type RequestContext struct {
 	RequestRunning            bool
 	Request                   *Request
 	Prompt 				  string
+	GeneratedTokenCount int
 
 	LastSeenMetrics *backendmetrics.MetricsState
 	SchedulingResult 	  *schedulingtypes.SchedulingResult
@@ -110,11 +112,13 @@ type RequestContext struct {
 	RequestState         StreamRequestState
 	ModelServerStreaming bool
 
+	TTFT float64
 	PredictedTTFT float64
 	PredictedTPOTObservations []float64
 
 	TPOTObservations	[]float64
-	TTFT float64
+	
+	TokenSampler *requtil.TokenSampler
 
 	Response *Response
 
@@ -293,10 +297,15 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 
 					if s.director.IsPredictorAvailable() {
 					var sumActual, sumPred float64
-        			for i, actual := range reqCtx.TPOTObservations {
+        			for _, actual := range reqCtx.TPOTObservations {
             			sumActual += actual
-            			sumPred += reqCtx.PredictedTPOTObservations[i]
+            			
         			}
+					for _, prediction := range reqCtx.PredictedTPOTObservations {
+            			sumPred += prediction
+            			
+        			}
+				
        				avgActual := sumActual / float64(len(reqCtx.TPOTObservations))
         			avgPred := sumPred / float64(len(reqCtx.PredictedTPOTObservations))
         			
@@ -310,6 +319,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 						logger.V(logutil.DEBUG).Info("Averages calculated", "avgActualTTFT", reqCtx.TTFT, "avgPredictedTTFT", reqCtx.PredictedTTFT)
 						logger.V(logutil.DEBUG).Info("MAPE TTFT computed", "mapeTTFT%", mapeTTFT)
 						metrics.RecordRequestTTFT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.TTFT/1000)
+						metrics.RecordRequestPredictedTTFT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.PredictedTTFT/1000)
 						metrics.RecordRequestTTFTPredictionMape(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, mapeTTFT)
 
         				}
@@ -321,6 +331,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 						logger.V(logutil.DEBUG).Info("Averages calculated", "avgActualTPOT", avgActual, "avgPredictedTPOT", avgPred)
 						logger.V(logutil.DEBUG).Info("MAPE TPOT computed", "mapeTPOT%", mapeTPOT)
 						metrics.RecordRequestTPOT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, avgActual/1000)
+						metrics.RecordRequestPredictedTPOT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, avgPred/1000)
 						metrics.RecordRequestTPOTPredictionMape(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, mapeTPOT)
 					}
 				}
