@@ -20,6 +20,7 @@ import (
 	"context"
 	"strings"
 
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 )
@@ -38,20 +39,19 @@ var _ framework.Filter = &HeaderBasedTestingFilter{}
 // NewHeaderBasedTestingFilter initializes a new HeaderBasedTestingFilter.
 // This should only be used for testing purposes.
 func NewHeaderBasedTestingFilter() *HeaderBasedTestingFilter {
-	return &HeaderBasedTestingFilter{}
+	return &HeaderBasedTestingFilter{
+		tn: plugins.TypedName{Type: "header-based-testing", Name: "header-based-testing-filter"},
+	}
 }
 
 // HeaderBasedTestingFilter filters Pods based on an address specified in the "test-epp-endpoint-selection" request header.
-type HeaderBasedTestingFilter struct{}
-
-// Type returns the type of the filter.
-func (f *HeaderBasedTestingFilter) Type() string {
-	return "header-based-testing"
+type HeaderBasedTestingFilter struct {
+	tn plugins.TypedName
 }
 
-// Name returns the type of the filter.
-func (f *HeaderBasedTestingFilter) Name() string {
-	return "header-based-testing-filter"
+// TypedName returns the type and name tuple of this plugin instance.
+func (f *HeaderBasedTestingFilter) TypedName() plugins.TypedName {
+	return f.tn
 }
 
 // Filter selects pods that match the IP addresses specified in the request header.
