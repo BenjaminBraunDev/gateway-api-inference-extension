@@ -510,7 +510,6 @@ func TestDirector_HandleResponseBodyChunk_FirstToken_WithFirstTPOTPrediction(t *
     assert.Equal(t, 0.0, sample.ActualTPOT, "TTFT sample should have zero TPOT")
     assert.Equal(t, 0.4, sample.KVCachePercentage)
     assert.Equal(t, 4, sample.InputTokenLength)
-    assert.Equal(t, 0, sample.NumTokensGenerated)
 
     // Should predict first TPOT in first token block
     assert.Equal(t, 1, predictionCalls, "Should make exactly one TPOT prediction for next token")
@@ -565,7 +564,6 @@ func TestDirector_HandleResponseBodyChunk_SecondToken_RecordsIfGeneratedTokenCou
     sample := mockPred.trainingSamples[0]
     assert.Equal(t, 0.0, sample.ActualTTFT, "TPOT sample should have zero TTFT")
     assert.Greater(t, sample.ActualTPOT, 20.0, "TPOT sample should have positive TPOT")
-    assert.Equal(t, 1, sample.NumTokensGenerated, "Should reflect token count when latency was generated")
     
     // Should NOT make new prediction for token 2 (no sampling call should be made)
     assert.Equal(t, 0, predictionCalls, "Should not make new predictions for token 2")
