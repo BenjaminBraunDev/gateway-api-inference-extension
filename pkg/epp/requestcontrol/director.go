@@ -286,12 +286,12 @@ func (d *Director) prepareRequest(ctx context.Context, reqCtx *handlers.RequestC
 	}
 
 	pr, ok := result.ProfileResults[result.PrimaryProfileName]
-	if ok && pr.TargetPod != nil {
-		reqCtx.LastSeenMetrics = pr.TargetPod.GetMetrics().Clone()
+	if ok && pr.TargetPods != nil {
+		reqCtx.LastSeenMetrics = pr.TargetPods[0].GetMetrics().Clone()
 	}
 
 	// Always set endpoint even if metrics missing
-	pod := pr.TargetPod.GetPod()
+	pod := pr.TargetPods[0].GetPod()
 	pool, err := d.datastore.PoolGet()
 	if err != nil {
 		return reqCtx, err
@@ -333,13 +333,13 @@ func (d *Director) HandleResponseHeaders(ctx context.Context, reqCtx *handlers.R
 	}
 
 	pr, ok := reqCtx.SchedulingResult.ProfileResults[reqCtx.SchedulingResult.PrimaryProfileName]
-	if !ok || pr.TargetPod == nil {
+	if !ok || pr.TargetPods[0] == nil {
 		logger.V(logutil.DEBUG).Info("No target pod metrics; skipping header prediction", "primaryProfile", reqCtx.SchedulingResult.PrimaryProfileName)
 		return reqCtx, nil
 	}
 
 	// Refresh metrics
-	reqCtx.LastSeenMetrics = pr.TargetPod.GetMetrics().Clone()
+	reqCtx.LastSeenMetrics = pr.TargetPods[0].GetMetrics().Clone()
 	logger.V(logutil.DEBUG).Info("Refreshed LastSeenMetrics at header",
 		"KVCache%", reqCtx.LastSeenMetrics.KVCacheUsagePercent,
 		"Waiting", reqCtx.LastSeenMetrics.WaitingQueueSize,
@@ -380,7 +380,7 @@ func (d *Director) HandleResponseBodyChunk(ctx context.Context, reqCtx *handlers
 	}
 
 	pr, ok := reqCtx.SchedulingResult.ProfileResults[reqCtx.SchedulingResult.PrimaryProfileName]
-	if !ok || pr.TargetPod == nil {
+	if !ok || pr.TargetPods[0] == nil {
 		logger.V(logutil.DEBUG).Info("Skipping body-chunk logic; no valid target pod")
 		return nil
 	}
@@ -546,7 +546,7 @@ func (d *Director) HandleResponseBodyChunk(ctx context.Context, reqCtx *handlers
 	// Always update timestamp for next calculation
 	reqCtx.LastTokenTimestamp = now
 	// Refresh metrics
-	reqCtx.LastSeenMetrics = pr.TargetPod.GetMetrics().Clone()
+	reqCtx.LastSeenMetrics = pr.TargetPods[0].GetMetrics().Clone()
 	logger.V(logutil.DEBUG).Info("Refreshed LastSeenMetrics at body chunk",
 		"KVCache%", reqCtx.LastSeenMetrics.KVCacheUsagePercent,
 		"Waiting", reqCtx.LastSeenMetrics.WaitingQueueSize,
