@@ -130,7 +130,13 @@ type Director struct {
 	postResponsePlugins []PostResponse
 }
 
-// HandleRequest orchestrates the request lifecycle.
+// HandleRequest orchestrates the request lifecycle:
+//  1. Parses request details.
+//  2. Calls admitRequest for admission control.
+//  3. Calls Scheduler.Schedule if request is approved.
+//  4. Calls prepareRequest to populate RequestContext with result and call PreRequest plugins.
+//
+// It always returns the requestContext even in the error case, as the request context is used in error handling.
 func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestContext) (*handlers.RequestContext, error) {
 	logger := log.FromContext(ctx)
 
@@ -197,13 +203,15 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	if len(candidatePods) == 0 {
 		return reqCtx, errutil.Error{Code: errutil.ServiceUnavailable, Msg: "failed to find candidate pods for serving the request"}
 	}
-	results, err := d.scheduler.Schedule(ctx, reqCtx.SchedulingRequest, candidatePods)
+	result, err := d.scheduler.Schedule(ctx, reqCtx.SchedulingRequest, candidatePods)
 	if err != nil {
 		return reqCtx, errutil.Error{Code: errutil.InferencePoolResourceExhausted, Msg: fmt.Errorf("failed to find target pod: %w", err).Error()}
 	}
 
-	// --- 4. Prepare Request ---
-	reqCtx, err = d.prepareRequest(ctx, reqCtx, results)
+	// --- 4. Prepare Request (Populates RequestContext and call PreRequest plugins) ---
+	// Insert target endpoint to instruct Envoy to route requests to the specified target pod and attach the port number.
+	// Invoke PreRequest registered plugins.
+	reqCtx, err = d.prepareRequest(ctx, reqCtx, result)
 	if err != nil {
 		return reqCtx, err
 	}
@@ -279,7 +287,7 @@ func (d *Director) getCandidatePodsForScheduling(ctx context.Context, requestMet
 }
 
 // prepareRequest populates the RequestContext and calls the registered PreRequest plugins
-// for allowing plugging customized logic based on the scheduling results.
+// for allowing plugging customized logic based on the scheduling result.
 func (d *Director) prepareRequest(ctx context.Context, reqCtx *handlers.RequestContext, result *schedulingtypes.SchedulingResult) (*handlers.RequestContext, error) {
 	if result == nil || len(result.ProfileResults) == 0 {
 		return reqCtx, errutil.Error{Code: errutil.Internal, Msg: "empty scheduling results"}
@@ -657,7 +665,8 @@ func RandomWeightedDraw(logger logr.Logger, model *v1alpha2.InferenceModel, seed
 }
 
 func (d *Director) runPreRequestPlugins(ctx context.Context, request *schedulingtypes.LLMRequest, schedulingResult *schedulingtypes.SchedulingResult,
-	targetPort int) {
+	targetPort int,
+) {
 	for _, plugin := range d.preRequestPlugins {
 		log.FromContext(ctx).V(logutil.DEBUG).Info("Running pre-request plugin", "plugin", plugin.TypedName().Type)
 		before := time.Now()
