@@ -476,7 +476,7 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 	return nil
 }
 
-func BuildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
+func buildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
 	var resp *extProcPb.ProcessingResponse
 
 	switch errutil.CanonicalCode(err) {
