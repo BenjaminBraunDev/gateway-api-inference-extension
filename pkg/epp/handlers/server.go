@@ -298,23 +298,6 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 					metrics.RecordResponseSizes(reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.ResponseSize)
 
 					if s.director.IsPredictorAvailable() {
-						// var sumActual, sumPred float64
-						// for _, actual := range reqCtx.TPOTObservations {
-						// 	sumActual += actual
-
-						// }
-						// for _, prediction := range reqCtx.PredictedTPOTObservations {
-						// 	sumPred += prediction
-
-						// }
-
-						// avgActual := sumActual / float64(len(reqCtx.TPOTObservations))
-						// avgPred := sumPred / float64(len(reqCtx.PredictedTPOTObservations))
-
-						// reqCtx.AvgTPOT = avgActual
-						// reqCtx.AvgPredictedTPOT = avgPred
-
-						// Compute MAPE for TTFT
 						mapeTTFT := 0.0
 						if reqCtx.TTFT > 0 {
 							mapeTTFT = math.Abs((reqCtx.TTFT-reqCtx.PredictedTTFT)/reqCtx.TTFT) * 100

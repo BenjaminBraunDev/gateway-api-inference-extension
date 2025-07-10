@@ -34,8 +34,6 @@ import (
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
-
-	// Assuming the predictor is located here. Adjust the import path if necessary.
 	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/latencypredictorasync"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -74,6 +72,9 @@ type RequestContext struct {
 const (
 	subsetHintNamespace = "envoy.lb.subset_hint"
 	subsetHintKey       = "x-gateway-destination-endpoint-subset"
+)
+
+const (
 	// Poisson sampling parameters for predictions
 	defaultSamplingMean = 50 // Mean interval between prediction samples (tokens)
 	maxSampledTokens    = 50 // Maximum number of prediction samples per request
@@ -292,22 +293,30 @@ func (d *Director) prepareRequest(ctx context.Context, reqCtx *handlers.RequestC
 	if result == nil || len(result.ProfileResults) == 0 {
 		return reqCtx, errutil.Error{Code: errutil.Internal, Msg: "empty scheduling results"}
 	}
+	// primary profile is used to set destination
+	// TODO should use multiple destinations according to epp protocol. current code assumes a single target
+	targetPod := result.ProfileResults[result.PrimaryProfileName].TargetPods[0].GetPod()
 
 	pr, ok := result.ProfileResults[result.PrimaryProfileName]
 	if ok && pr.TargetPods != nil {
 		reqCtx.LastSeenMetrics = pr.TargetPods[0].GetMetrics().Clone()
 	}
 
-	// Always set endpoint even if metrics missing
-	pod := pr.TargetPods[0].GetPod()
 	pool, err := d.datastore.PoolGet()
 	if err != nil {
 		return reqCtx, err
 	}
-	reqCtx.TargetPod = pod
-	reqCtx.TargetEndpoint = net.JoinHostPort(pod.Address, strconv.Itoa(int(pool.Spec.TargetPortNumber)))
+	targetPort := int(pool.Spec.TargetPortNumber)
+
+	endpoint := net.JoinHostPort(targetPod.Address, strconv.Itoa(targetPort))
+	logger.V(logutil.DEFAULT).Info("Request handled", "model", reqCtx.Model, "targetModel", reqCtx.ResolvedTargetModel, "endpoint", targetPod)
+
+	reqCtx.TargetPod = targetPod
+	reqCtx.TargetEndpoint = endpoint
 	reqCtx.SchedulingResult = result
-	d.runPreRequestPlugins(ctx, reqCtx.SchedulingRequest, result, int(pool.Spec.TargetPortNumber))
+
+	d.runPreRequestPlugins(ctx, reqCtx.SchedulingRequest, result, targetPort)
+
 	return reqCtx, nil
 }
 
@@ -341,7 +350,7 @@ func (d *Director) HandleResponseHeaders(ctx context.Context, reqCtx *handlers.R
 	}
 
 	pr, ok := reqCtx.SchedulingResult.ProfileResults[reqCtx.SchedulingResult.PrimaryProfileName]
-	if !ok || pr.TargetPods[0] == nil {
+	if !ok || pr.TargetPods == nil {
 		logger.V(logutil.DEBUG).Info("No target pod metrics; skipping header prediction", "primaryProfile", reqCtx.SchedulingResult.PrimaryProfileName)
 		return reqCtx, nil
 	}

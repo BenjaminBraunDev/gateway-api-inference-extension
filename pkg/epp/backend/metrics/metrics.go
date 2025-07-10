@@ -96,8 +96,6 @@ func (p *PodMetricsClientImpl) promToPodMetrics(
 		}
 	}
 
-
-
 	if p.MetricMapping.KVCacheUtilization != nil {
 		usage, err := p.getMetric(metricFamilies, *p.MetricMapping.KVCacheUtilization)
 		if err == nil {

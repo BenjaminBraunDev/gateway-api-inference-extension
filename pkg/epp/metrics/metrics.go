@@ -64,21 +64,6 @@ var (
 		[]string{"model_name", "target_model_name", "error_code"},
 	)
 
-	requestLatencies = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Subsystem: InferenceModelComponent,
-			Name:      "request_duration_seconds",
-			Help:      metricsutil.HelpMsgWithStability("Inference model response latency distribution in seconds for each model and target model.", compbasemetrics.ALPHA),
-			Buckets: []float64{
-				0.005, 0.025, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0, 1.25, 1.5, 2, 3,
-				4, 5, 6, 8, 10, 15, 20, 30, 45, 60, 120, 180, 240, 300, 360, 480, 600, 900, 1200, 1800, 2700, 3600,
-			},
-		},
-		[]string{"model_name", "target_model_name"},
-	)
-
-
-
 	requestTTFT = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Subsystem: InferenceModelComponent,
@@ -114,7 +99,7 @@ var (
 		[]string{"model_name", "target_model_name"},
 	)
 
-	requestPredictedTTFTGauge = prometheus.NewGaugeVec(	
+	requestPredictedTTFTGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Subsystem: InferenceModelComponent,
 			Name:      "request_predicted_ttft_seconds_gauge",
@@ -130,7 +115,7 @@ var (
 			Help:      metricsutil.HelpMsgWithStability("Inference model TPOT distribution in seconds for each model and target model.", compbasemetrics.ALPHA),
 			Buckets: []float64{
 				0.0005, 0.00205, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1, 0.125, 0.15, 0.2, 0.3,
-				0.4, 0.5, 0.6, 0.8, 1, 1.5, 2, 3, 4.5,  6, 12, 18, 24, 30, 36, 48, 60, 90, 120, 180, 270, 360,
+				0.4, 0.5, 0.6, 0.8, 1, 1.5, 2, 3, 4.5, 6, 12, 18, 24, 30, 36, 48, 60, 90, 120, 180, 270, 360,
 			},
 		},
 		[]string{"model_name", "target_model_name"},
@@ -151,7 +136,7 @@ var (
 			Help:      metricsutil.HelpMsgWithStability("Inference model Predicted TPOT distribution in seconds for each model and target model.", compbasemetrics.ALPHA),
 			Buckets: []float64{
 				0.0005, 0.00205, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1, 0.125, 0.15, 0.2, 0.3,
-				0.4, 0.5, 0.6, 0.8, 1, 1.5, 2, 3, 4.5,  6, 12, 18, 24, 30, 36, 48, 60, 90, 120, 180, 270, 360,
+				0.4, 0.5, 0.6, 0.8, 1, 1.5, 2, 3, 4.5, 6, 12, 18, 24, 30, 36, 48, 60, 90, 120, 180, 270, 360,
 			},
 		},
 		[]string{"model_name", "target_model_name"},
@@ -166,16 +151,14 @@ var (
 		[]string{"model_name", "target_model_name"},
 	)
 
-
-
 	requestTPOTPredictionMAPE = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Subsystem: InferenceModelComponent,
 			Name:      "request_tpot_predictions_mape",
 			Help:      metricsutil.HelpMsgWithStability("Inference model TPOT prediction mape distribution in seconds for each model and target model.", compbasemetrics.ALPHA),
 			Buckets: []float64{
-				1, 2,4, 6, 8, 10, 12, 14, 16, 18, 20, 25, 30, 35, 40, 50, 60,
-				70, 80, 90, 100, 
+				1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 25, 30, 35, 40, 50, 60,
+				70, 80, 90, 100,
 			},
 		},
 		[]string{"model_name", "target_model_name"},
@@ -196,8 +179,8 @@ var (
 			Name:      "request_ttft_predictions_mape",
 			Help:      metricsutil.HelpMsgWithStability("Inference model TTFT prediction mape distribution in seconds for each model and target model.", compbasemetrics.ALPHA),
 			Buckets: []float64{
-				1, 2,4, 6, 8, 10, 12, 14, 16, 18, 20, 25, 30, 35, 40, 50, 60,
-				70, 80, 90, 100, 
+				1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 25, 30, 35, 40, 50, 60,
+				70, 80, 90, 100,
 			},
 		},
 		[]string{"model_name", "target_model_name"},
@@ -208,6 +191,19 @@ var (
 			Subsystem: InferenceModelComponent,
 			Name:      "request_ttft_predictions_mape_gauge",
 			Help:      metricsutil.HelpMsgWithStability("Inference model TTFT prediction mape gauge in seconds for each model and target model.", compbasemetrics.ALPHA),
+		},
+		[]string{"model_name", "target_model_name"},
+	)
+
+	requestLatencies = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Subsystem: InferenceModelComponent,
+			Name:      "request_duration_seconds",
+			Help:      metricsutil.HelpMsgWithStability("Inference model response latency distribution in seconds for each model and target model.", compbasemetrics.ALPHA),
+			Buckets: []float64{
+				0.005, 0.025, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0, 1.25, 1.5, 2, 3,
+				4, 5, 6, 8, 10, 15, 20, 30, 45, 60, 120, 180, 240, 300, 360, 480, 600, 900, 1200, 1800, 2700, 3600,
+			},
 		},
 		[]string{"model_name", "target_model_name"},
 	)
@@ -396,14 +392,11 @@ var registerMetrics sync.Once
 // Register all metrics.
 func Register(customCollectors ...prometheus.Collector) {
 	registerMetrics.Do(func() {
-
 		metrics.Registry.MustRegister(requestTPOT)
 		metrics.Registry.MustRegister(requestTTFT)
 
 		metrics.Registry.MustRegister(requestTPOTGauge)
 		metrics.Registry.MustRegister(requestTTFTGauge)
-
-
 
 		metrics.Registry.MustRegister(requestPredictedTPOT)
 		metrics.Registry.MustRegister(requestPredictedTTFT)
@@ -411,14 +404,10 @@ func Register(customCollectors ...prometheus.Collector) {
 		metrics.Registry.MustRegister(requestPredictedTPOTGauge)
 		metrics.Registry.MustRegister(requestPredictedTTFTGauge)
 
-
-
-
 		metrics.Registry.MustRegister(requestTPOTPredictionMAPE)
 		metrics.Registry.MustRegister(requestTTFTPredictionMAPE)
 		metrics.Registry.MustRegister(requestTPOTPredictionMAPEGauge)
 		metrics.Registry.MustRegister(requestTTFTPredictionMAPEGauge)
-
 		metrics.Registry.MustRegister(requestCounter)
 		metrics.Registry.MustRegister(requestErrCounter)
 		metrics.Registry.MustRegister(requestLatencies)
@@ -438,8 +427,6 @@ func Register(customCollectors ...prometheus.Collector) {
 		metrics.Registry.MustRegister(PrefixCacheSize)
 		metrics.Registry.MustRegister(PrefixCacheHitRatio)
 		metrics.Registry.MustRegister(PrefixCacheHitLength)
-
-
 
 		for _, collector := range customCollectors {
 			metrics.Registry.MustRegister(collector)
@@ -479,7 +466,6 @@ func Reset() {
 	requestTTFTPredictionMAPE.Reset()
 	requestTTFTPredictionMAPEGauge.Reset()
 
-
 	requestPredictedTPOT.Reset()
 	requestPredictedTTFT.Reset()
 	requestPredictedTPOTGauge.Reset()
@@ -515,7 +501,6 @@ func RecordRequestLatencies(ctx context.Context, modelName, targetModelName stri
 	return true
 }
 
-// TPOT records duration of request.
 func RecordRequestTPOT(ctx context.Context, modelName, targetModelName string, tpot float64) bool {
 	if tpot < 0 {
 		log.FromContext(ctx).V(logutil.DEFAULT).Error(nil, "TPOT value must be non-negative",
@@ -526,8 +511,6 @@ func RecordRequestTPOT(ctx context.Context, modelName, targetModelName string, t
 	requestTPOTGauge.WithLabelValues(modelName, targetModelName).Set(tpot)
 	return true
 }
-
-
 
 // TPOT records duration of request.
 func RecordRequestPredictedTPOT(ctx context.Context, modelName, targetModelName string, predicted_tpot float64) bool {
@@ -541,11 +524,10 @@ func RecordRequestPredictedTPOT(ctx context.Context, modelName, targetModelName 
 	return true
 }
 
-
 // TTFT records duration of request.
 func RecordRequestTTFT(ctx context.Context, modelName, targetModelName string, ttft float64) bool {
 	if ttft < 0 {
-		log.FromContext(ctx).V(logutil.DEFAULT).Error(nil, "TTFT value must be non-negative", 
+		log.FromContext(ctx).V(logutil.DEFAULT).Error(nil, "TTFT value must be non-negative",
 			"modelName", modelName, "targetModelName", targetModelName, "ttft", ttft)
 		return false
 	}

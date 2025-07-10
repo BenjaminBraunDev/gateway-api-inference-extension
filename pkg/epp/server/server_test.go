@@ -187,14 +187,14 @@ func (ts *testDirector) HandleResponseHeaders(ctx context.Context, reqCtx *handl
 	return reqCtx, nil
 }
 
-func (ts *testDirector) HandleResponseBodyChunk(ctx context.Context, reqCtx *handlers.RequestContext) ( error) {
+func (ts *testDirector) HandleResponseBodyChunk(ctx context.Context, reqCtx *handlers.RequestContext) error {
 	// Implement logic for handling response body chunk if needed
-	return  nil
+	return nil
 }
 
 func (ts *testDirector) HandleResponseTrailers(ctx context.Context, reqCtx *handlers.RequestContext) (*handlers.RequestContext, error) {
 	// Implement logic for handling response body chunk if needed
-	return  reqCtx, nil
+	return reqCtx, nil
 }
 
 func (ts *testDirector) GetRandomPod() *backend.Pod {
@@ -204,4 +204,4 @@ func (ts *testDirector) GetRandomPod() *backend.Pod {
 func (ts *testDirector) IsPredictorAvailable() bool {
 	// Implement logic to check if predictor is available
 	return false
-}	
+}

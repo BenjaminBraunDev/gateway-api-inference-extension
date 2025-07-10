@@ -546,7 +546,7 @@ func TestGetCandidatePodsForScheduling(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			director := NewDirectorWithConfig(ds, &mockScheduler{}, &mockSaturationDetector{}, NewConfig())
+			director := NewDirectorWithConfig(ds, &mockScheduler{}, &mockSaturationDetector{}, NewConfig(), nil)
 
 			got := director.getCandidatePodsForScheduling(context.Background(), test.metadata)
 
@@ -902,7 +902,7 @@ func TestDirector_HandleResponse(t *testing.T) {
 	ctx := logutil.NewTestLoggerIntoContext(context.Background())
 	ds := datastore.NewDatastore(t.Context(), nil)
 	mockSched := &mockScheduler{}
-	director := NewDirectorWithConfig(ds, mockSched, nil, NewConfig().WithPostResponsePlugins(pr1), nil)
+	director := NewDirectorWithConfig(ds, mockSched, nil, NewConfig().WithPostResponsePlugins(pr1))
 
 	reqCtx := &handlers.RequestContext{
 		Request: &handlers.Request{
@@ -917,7 +917,7 @@ func TestDirector_HandleResponse(t *testing.T) {
 		TargetPod: &backend.Pod{NamespacedName: types.NamespacedName{Namespace: "namespace1", Name: "test-pod-name"}},
 	}
 
-	_, err := director.HandleResponseHeaders(ctx, reqCtx)
+	_, err := director.HandleResponse(ctx, reqCtx)
 	if err != nil {
 		t.Fatalf("HandleResponse() returned unexpected error: %v", err)
 	}

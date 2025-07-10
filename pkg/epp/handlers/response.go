@@ -25,7 +25,6 @@ import (
 	filterPb "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/ext_proc/v3"
 	extProcPb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	"github.com/go-logr/logr"
-
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
@@ -73,6 +72,9 @@ func (s *StreamingServer) HandleResponseBodyModelStreaming(ctx context.Context, 
 		reqCtx.Usage = resp.Usage
 		metrics.RecordInputTokens(reqCtx.Model, reqCtx.ResolvedTargetModel, resp.Usage.PromptTokens)
 		metrics.RecordOutputTokens(reqCtx.Model, reqCtx.ResolvedTargetModel, resp.Usage.CompletionTokens)
+	}
+	if s.director != nil && s.director.IsPredictorAvailable() {
+		s.director.HandleResponseBodyChunk(ctx, reqCtx)
 	}
 	s.director.HandleResponseBodyChunk(ctx, reqCtx)
 }
