@@ -72,8 +72,8 @@ type RequestContext struct {
 
 const (
 	// Poisson sampling parameters for predictions
-	defaultSamplingMean = 20 // Mean interval between prediction samples (tokens)
-	maxSampledTokens    = 10   // Maximum number of prediction samples per request
+	defaultSamplingMean = 50 // Mean interval between prediction samples (tokens)
+	maxSampledTokens    = 50   // Maximum number of prediction samples per request
 )
 
 // splitWords splits a string into words based on whitespace and returns the resulting slice.
