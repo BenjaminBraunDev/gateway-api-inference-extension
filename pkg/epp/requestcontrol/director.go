@@ -36,7 +36,6 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
 	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/latencypredictorasync"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	errutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/error"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
@@ -94,7 +93,7 @@ func calculateRunningAverage(currentAvg float64, newValue float64, count int) fl
 
 // Scheduler defines the interface required by the Director for scheduling.
 type Scheduler interface {
-	Schedule(ctx context.Context, request *schedulingtypes.LLMRequest, candidatePods []schedulingtypes.Pod) (result *schedulingtypes.SchedulingResult, rawResults map[string]*types.ProfileRunResult, err error)
+	Schedule(ctx context.Context, request *schedulingtypes.LLMRequest, candidatePods []schedulingtypes.Pod) (result *schedulingtypes.SchedulingResult, err error)
 
 	// CycleState returns the current cycle state for the scheduler.
 	GetCycleState() *schedulingtypes.CycleState
@@ -204,13 +203,15 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 		return reqCtx, errutil.Error{Code: errutil.ServiceUnavailable, Msg: "failed to find candidate pods for serving the request"}
 	}
 
-	result, rawresults, err := d.scheduler.Schedule(ctx, reqCtx.SchedulingRequest, candidatePods)
+	result, err := d.scheduler.Schedule(ctx, reqCtx.SchedulingRequest, candidatePods)
 
 	// get prediction for scheduling if predictor is available
 	if d.latencyPredictor != nil {
 		for _, pod := range candidatePods {
 			logger.V(logutil.TRACE).Info("Candidate pod for scheduling", "pod", pod.GetPod().String(), "metrics", pod.GetMetrics().String())
-			predictionResult, err := PredictWithMetrics(ctx, d.latencyPredictor, pod.GetMetrics(), reqCtx.Prompt, 1)
+			// get prefix cache score for the pod
+			prefixCacheScore := GetPrefixCacheScoreForPod(ctx, result, pod, "prefill")
+			predictionResult, err := PredictWithMetrics(ctx, d.latencyPredictor, pod.GetMetrics(), reqCtx.Prompt, 1, prefixCacheScore)
 			if err != nil {
 				logger.V(logutil.DEBUG).Info("Skipping pod due to prediction error", "pod", pod.GetPod().String(), "error", err)
 				continue
@@ -219,6 +220,7 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 			reqCtx.PredictedTPOTForScheduling = append(reqCtx.PredictedTPOTForScheduling, predictionResult.TPOT)
 		}
 	}
+	//
 
 	if err != nil {
 		return reqCtx, errutil.Error{Code: errutil.InferencePoolResourceExhausted, Msg: fmt.Errorf("failed to find target pod: %w", err).Error()}
@@ -227,7 +229,7 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	// --- 4. Prepare Request (Populates RequestContext and call PreRequest plugins) ---
 	// Insert target endpoint to instruct Envoy to route requests to the specified target pod and attach the port number.
 	// Invoke PreRequest registered plugins.
-	reqCtx, err = d.prepareRequest(ctx, reqCtx, result, rawresults)
+	reqCtx, err = d.prepareRequest(ctx, reqCtx, result)
 	if err != nil {
 		return reqCtx, err
 	}
@@ -304,7 +306,7 @@ func (d *Director) getCandidatePodsForScheduling(ctx context.Context, requestMet
 
 // prepareRequest populates the RequestContext and calls the registered PreRequest plugins
 // for allowing plugging customized logic based on the scheduling result.
-func (d *Director) prepareRequest(ctx context.Context, reqCtx *handlers.RequestContext, result *schedulingtypes.SchedulingResult, rawResults map[string]*types.ProfileRunResult) (*handlers.RequestContext, error) {
+func (d *Director) prepareRequest(ctx context.Context, reqCtx *handlers.RequestContext, result *schedulingtypes.SchedulingResult) (*handlers.RequestContext, error) {
 	logger := log.FromContext(ctx)
 	if result == nil || len(result.ProfileResults) == 0 {
 		return reqCtx, errutil.Error{Code: errutil.Internal, Msg: "empty scheduling results"}
@@ -325,9 +327,7 @@ func (d *Director) prepareRequest(ctx context.Context, reqCtx *handlers.RequestC
 	reqCtx.TargetEndpoint = endpoint
 
 	d.runPreRequestPlugins(ctx, reqCtx.SchedulingRequest, result, targetPort)
-
 	reqCtx.SchedulingResult = result
-	reqCtx.RawSchedulingResults = rawResults
 	reqCtx.LastSeenMetrics = make(map[string]*backendmetrics.MetricsState)
 	RefreshLastSeenMetrics(ctx, reqCtx)
 

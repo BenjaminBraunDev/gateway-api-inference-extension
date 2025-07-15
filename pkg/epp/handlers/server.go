@@ -91,7 +91,6 @@ type RequestContext struct {
 	ResolvedTargetModel       string
 	RequestReceivedTimestamp  time.Time
 	ResponseCompleteTimestamp time.Time
-	FirstTokenTimestamp       time.Time
 	LastTokenTimestamp        time.Time
 	RequestSize               int
 	Usage                     Usage
@@ -103,10 +102,9 @@ type RequestContext struct {
 	Prompt                    string
 	GeneratedTokenCount       int
 
-	LastSeenMetrics      map[string]*backendmetrics.MetricsState
-	SchedulingResult     *schedulingtypes.SchedulingResult
-	SchedulingRequest    *schedulingtypes.LLMRequest
-	RawSchedulingResults map[string]*schedulingtypes.ProfileRunResult
+	LastSeenMetrics   map[string]*backendmetrics.MetricsState
+	SchedulingResult  *schedulingtypes.SchedulingResult
+	SchedulingRequest *schedulingtypes.LLMRequest
 
 	RequestState         StreamRequestState
 	ModelServerStreaming bool
