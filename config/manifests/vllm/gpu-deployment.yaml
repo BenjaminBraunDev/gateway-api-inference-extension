@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: vllm
-          image: "vllm/vllm-openai:latest"
+          image: "vllm/vllm-openai:v0.8.5"
           imagePullPolicy: Always
           command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
           args:
@@ -28,13 +28,7 @@ spec:
           - "1024"
           - "--compilation-config"
           - "3"
-          - "--enable-lora"
-          - "--max-loras"
-          - "2"
-          - "--max-lora-rank"
-          - "8"
-          - "--max-cpu-loras"
-          - "12"
+          - "--no-enable-prefix-caching"
           env:
             # Enabling LoRA support temporarily disables automatic v1, we want to force it on
             # until 0.8.3 vLLM is released.

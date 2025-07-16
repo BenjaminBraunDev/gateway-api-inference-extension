@@ -31,6 +31,10 @@ type LLMRequest struct {
 	TargetModel string
 	// Prompt is the prompt that was sent in the request body.
 	Prompt string
+	// TTFTSLO is the target time to first token SLO for the request.
+	TTFTSLO float64
+	// TPOTSLO is the target time per output token SLO for the request.
+	AvgTPOTSLO float64
 	// Headers is a map of the request headers.
 	Headers map[string]string
 }

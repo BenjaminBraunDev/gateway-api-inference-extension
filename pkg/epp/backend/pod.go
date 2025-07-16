@@ -23,9 +23,10 @@ import (
 )
 
 type Pod struct {
-	NamespacedName types.NamespacedName
-	Address        string
-	Labels         map[string]string
+	NamespacedName  types.NamespacedName
+	Address         string
+	Labels          map[string]string
+	RunningRequests *RequestPriorityQueue
 }
 
 func (p *Pod) String() string {

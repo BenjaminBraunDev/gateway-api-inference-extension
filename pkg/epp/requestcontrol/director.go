@@ -66,7 +66,7 @@ func calculateRunningAverage(currentAvg float64, newValue float64, count int) fl
 
 // Scheduler defines the interface required by the Director for scheduling.
 type Scheduler interface {
-	Schedule(ctx context.Context, request *schedulingtypes.LLMRequest, candidatePods []schedulingtypes.Pod) (result *schedulingtypes.SchedulingResult,  err error)
+	Schedule(ctx context.Context, request *schedulingtypes.LLMRequest, candidatePods []schedulingtypes.Pod) (result *schedulingtypes.SchedulingResult, err error)
 
 	// CycleState returns the current cycle state for the scheduler.
 }
@@ -148,13 +148,28 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 		requestCriticality = *modelObj.Spec.Criticality
 	}
 
+	// Get Request SLOs from request body
+	ttftSLO, foundTTFTSLO, err := parseFloatHeader(reqCtx, "ttft_slo")
+	if err != nil {
+		return reqCtx, errutil.Error{Code: errutil.BadRequest, Msg: fmt.Sprintf("ttft_slo must be a float: %v", err)}
+	}
+	avgTPOTSLO, foundTPOTSLO, err := parseFloatHeader(reqCtx, "avg_tpot_slo")
+	if err != nil {
+		return reqCtx, errutil.Error{Code: errutil.BadRequest, Msg: fmt.Sprintf("avg_tpot_slo must be a float: %v", err)}
+	}
+	latencySLOProvided := foundTTFTSLO && foundTPOTSLO
+
 	// Prepare LLMRequest (needed for both saturation detection and Scheduler)
 	reqCtx.SchedulingRequest = &schedulingtypes.LLMRequest{
 		RequestId:   reqCtx.Request.Headers[requtil.RequestIdHeaderKey],
 		TargetModel: reqCtx.ResolvedTargetModel,
 		Prompt:      prompt,
+		TTFTSLO:     ttftSLO,
+		AvgTPOTSLO:  avgTPOTSLO,
 		Headers:     reqCtx.Request.Headers,
 	}
+
+	// if we are doing SLO routing, remove the kv and prefill scorers from the scheduling request
 
 	logger = logger.WithValues("model", reqCtx.Model, "resolvedTargetModel", reqCtx.ResolvedTargetModel, "criticality", requestCriticality)
 
@@ -172,12 +187,12 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 		return reqCtx, errutil.Error{Code: errutil.ServiceUnavailable, Msg: "failed to find candidate pods for serving the request"}
 	}
 
-
-	result,  err := d.scheduler.Schedule(ctx, reqCtx.SchedulingRequest, candidatePods)
-	
+	result, err := d.scheduler.Schedule(ctx, reqCtx.SchedulingRequest, candidatePods)
 
 	// get prediction for scheduling if predictor is available
-	if d.latencyPredictor != nil {
+	if d.latencyPredictor != nil && latencySLOProvided {
+		defautResult := result
+		validPods := make([]schedulingtypes.Pod, 0, len(candidatePods))
 		for _, pod := range candidatePods {
 			logger.V(logutil.TRACE).Info("Candidate pod for scheduling", "pod", pod.GetPod().String(), "metrics", pod.GetMetrics().String())
 			// get prefix cache score for the pod
@@ -187,7 +202,7 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 				logger.V(logutil.DEBUG).Info("Skipping pod due to prediction error", "pod", pod.GetPod().String(), "error", err)
 				continue
 			}
-			reqCtx.PredictedTTFTForScheduling = predictionResult.TTFT
+			reqCtx.PredictedTTFTForScheduling = append(reqCtx.PredictedTTFTForScheduling, predictionResult.TTFT)
 			reqCtx.PredictedTPOTForScheduling = append(reqCtx.PredictedTPOTForScheduling, predictionResult.TPOT)
 		}
 	}
@@ -206,6 +221,82 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	}
 
 	return reqCtx, nil
+}
+
+// parseFloatHeader retrieves a header by name, parses it as a float64,
+// and returns the value or an error if the header is missing or invalid.
+func parseFloatHeader(reqCtx *handlers.RequestContext, headerName string) (float64, bool, error) {
+	// 1. Get header value from the map
+	headerValue, ok := reqCtx.Request.Headers[headerName]
+	if !ok {
+		return 0, false, nil // Header not found, return 0 and false
+	}
+
+	// 2. Parse the header value to a float64
+	parsedFloat, err := strconv.ParseFloat(headerValue, 64)
+	if err != nil {
+		return 0, false, errutil.Error{
+			Code: errutil.BadRequest,
+			Msg:  fmt.Sprintf("%s must be a float", headerName),
+		}
+	}
+
+	// 3. Return the successfully parsed value
+	return parsedFloat, true, nil
+}
+
+type Choice struct {
+	PodName schedulingtypes.Pod
+	Weight  int
+}
+
+// SelectPod performs a weighted random draw from candidatePods, giving a
+// strong preference to pods within the validPods subset.
+func SelectPod(candidatePods []schedulingtypes.Pod, validPods []schedulingtypes.Pod) (schedulingtypes.Pod, error) {
+	if len(candidatePods) == 0 {
+		return nil, fmt.Errorf("candidatePods cannot be empty")
+	}
+
+	const highWeight = 100 // Weight for a valid pod
+	const lowWeight = 1    // Weight for other candidate pods
+
+	// Use a map for efficient O(1) average time lookups.
+	validPodsSet := make(map[schedulingtypes.Pod]struct{}, len(validPods))
+	for _, pod := range validPods {
+		validPodsSet[pod] = struct{}{}
+	}
+
+	choices := make([]Choice, 0, len(candidatePods))
+	var totalWeight int
+
+	// Assign weights to all candidates.
+	for _, pod := range candidatePods {
+		weight := lowWeight
+		if _, isValid := validPodsSet[pod]; isValid {
+			weight = highWeight
+		}
+		choices = append(choices, Choice{PodName: pod, Weight: weight})
+		totalWeight += weight
+	}
+
+	if totalWeight <= 0 {
+		return nil, fmt.Errorf("total weight of pods must be positive")
+	}
+
+	// Seed the random number generator. Note: In applications where this is
+	// called frequently, you might seed once at application start.
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	randomNumber := r.Intn(totalWeight)
+
+	// Find the selected item.
+	for _, choice := range choices {
+		if randomNumber < choice.Weight {
+			return choice.PodName, nil
+		}
+		randomNumber -= choice.Weight
+	}
+
+	return nil, fmt.Errorf("error during selection, this should not be reached")
 }
 
 // admitRequest handles admission control to decide whether or not to accept the request
@@ -295,9 +386,9 @@ func (d *Director) prepareRequest(ctx context.Context, reqCtx *handlers.RequestC
 	logger.V(logutil.DEFAULT).Info("Request handled", "model", reqCtx.Model, "targetModel", reqCtx.ResolvedTargetModel, "endpoint", targetPod)
 
 	reqCtx.TargetPod = targetPod
+	reqCtx.TargetPod.RunningRequests.Add(reqCtx.Request.Headers[requtil.RequestIdHeaderKey], reqCtx.SchedulingRequest.TTFTSLO)
 	reqCtx.TargetEndpoint = endpoint
 
-	
 	d.runPreRequestPlugins(ctx, reqCtx.SchedulingRequest, result, targetPort)
 	reqCtx.SchedulingResult = result
 	reqCtx.LastSeenMetrics = make(map[string]*backendmetrics.MetricsState)
