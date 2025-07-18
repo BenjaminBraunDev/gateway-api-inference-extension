@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: vllm-llama3-8b-instruct
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: vllm-llama3-8b-instruct
@@ -42,7 +42,7 @@ spec:
                   name: hf-token
                   key: token
             - name: VLLM_ALLOW_RUNTIME_LORA_UPDATING
-              value: "true"
+              value: "false"
           ports:
             - containerPort: 8000
               name: http
@@ -145,19 +145,6 @@ spec:
               name: shm
             - name: adapters
               mountPath: "/adapters"
-      initContainers:
-        - name: lora-adapter-syncer
-          tty: true
-          stdin: true 
-          image: us-central1-docker.pkg.dev/k8s-staging-images/gateway-api-inference-extension/lora-syncer:main
-          restartPolicy: Always
-          imagePullPolicy: Always
-          env: 
-            - name: DYNAMIC_LORA_ROLLOUT_CONFIG
-              value: "/config/configmap.yaml"
-          volumeMounts: # DO NOT USE subPath, dynamic configmap updates don't work on subPaths
-          - name: config-volume
-            mountPath:  /config
       restartPolicy: Always
 
       # vLLM allows VLLM_PORT to be specified as an environment variable, but a user might

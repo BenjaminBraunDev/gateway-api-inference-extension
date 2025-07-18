@@ -47,7 +47,6 @@ type Pod interface {
 	GetPod() *backend.Pod
 	GetMetrics() *backendmetrics.MetricsState
 	String() string
-	
 }
 
 type ScoredPod struct {
@@ -84,7 +83,7 @@ type ProfileRunResult struct {
 
 // SchedulingResult captures the result of the scheduling cycle.
 type SchedulingResult struct {
-	ProfileResults     map[string]*ProfileRunResult
+	ProfileResults       map[string]*ProfileRunResult
 	AllProfileRunResults map[string]*ProfileRunResult
-	PrimaryProfileName string
+	PrimaryProfileName   string
 }

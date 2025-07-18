@@ -49,8 +49,8 @@ const (
 
 const (
 	// Poisson sampling parameters for predictions
-	defaultSamplingMean = 50 // Mean interval between prediction samples (tokens)
-	maxSampledTokens    = 50 // Maximum number of prediction samples per request
+	defaultSamplingMean = 100 // Mean interval between prediction samples (tokens)
+	maxSampledTokens    = 20  // Maximum number of prediction samples per request
 )
 
 // calculateRunningAverage calculates the running average efficiently
@@ -204,6 +204,41 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 			}
 			reqCtx.PredictedTTFTForScheduling = append(reqCtx.PredictedTTFTForScheduling, predictionResult.TTFT)
 			reqCtx.PredictedTPOTForScheduling = append(reqCtx.PredictedTPOTForScheduling, predictionResult.TPOT)
+			// Log the prediction for debugging
+			logger.V(logutil.DEBUG).Info("is Running Requests nil?", "is_nil", pod.GetPod().RunningRequests == nil)
+			logger.V(logutil.DEBUG).Info("Length fo running requests", "runnign_requests_length", pod.GetPod().RunningRequests.Len())
+			logger.V(logutil.DEBUG).Info("Currently running requests", "pod", pod.GetPod().RunningRequests.String())
+			// check if scheduling this request maintains running requests' SLOs (prediction must be lower than the lowest TPOT SLO of all running requests)
+			requestMaintainsLowestSLO := pod.GetPod().RunningRequests.Peek() == nil || predictionResult.TPOT < pod.GetPod().RunningRequests.Peek().TPOT
+			logger.V(logutil.DEBUG).Info("Maintains lowest SLO", "nil_or_lower", requestMaintainsLowestSLO)
+			tpotValid := predictionResult.TPOT < reqCtx.SchedulingRequest.AvgTPOTSLO && requestMaintainsLowestSLO
+			ttftValid := predictionResult.TTFT < reqCtx.SchedulingRequest.TTFTSLO
+			logger.V(logutil.DEBUG).Info("Prediction for scheduling", "pod", pod.GetPod().String(), "TTFT", predictionResult.TTFT, "TPOT", predictionResult.TPOT, "tpotValid", tpotValid, "ttftValid", ttftValid)
+			if tpotValid && ttftValid {
+				// Add the pod to the scheduling result if it meets the prediction criteria
+				logger.V(logutil.DEBUG).Info("Adding pod to scheduling result based on prediction: ", "pod", pod.GetPod().String())
+				validPods = append(validPods, pod)
+			}
+		}
+
+		// if there are no valid pods:
+		// 		if request is non-critical, we can drop the request
+		//		else, set target pod to defaut
+		finalPod := defautResult.ProfileResults[defautResult.PrimaryProfileName].TargetPods[0]
+		if len(validPods) == 0 {
+			if requestCriticality == v1alpha2.Standard {
+				return reqCtx, errutil.Error{Code: errutil.InferencePoolResourceExhausted, Msg: "no valid pods found for scheduling, non-critical request dropped"}
+			} else {
+				logger.V(logutil.DEBUG).Info("No valid pods found for scheduling, using default pod")
+			}
+		} else {
+			finalPod, err = SelectPod(candidatePods, validPods)
+			logger.V(logutil.DEBUG).Info("Found target pod for scheduling", "pod", finalPod.GetPod().String())
+		}
+
+		result.ProfileResults[finalPod.GetPod().NamespacedName.String()] = &schedulingtypes.ProfileRunResult{
+			TargetPods: []schedulingtypes.Pod{finalPod},
+			RawScores:  map[string]map[schedulingtypes.Pod]float64{},
 		}
 	}
 	//
@@ -386,7 +421,11 @@ func (d *Director) prepareRequest(ctx context.Context, reqCtx *handlers.RequestC
 	logger.V(logutil.DEFAULT).Info("Request handled", "model", reqCtx.Model, "targetModel", reqCtx.ResolvedTargetModel, "endpoint", targetPod)
 
 	reqCtx.TargetPod = targetPod
-	reqCtx.TargetPod.RunningRequests.Add(reqCtx.Request.Headers[requtil.RequestIdHeaderKey], reqCtx.SchedulingRequest.TTFTSLO)
+
+	// only add if we have latency SLOs
+	if (reqCtx.SchedulingRequest.TTFTSLO > 0 && reqCtx.SchedulingRequest.AvgTPOTSLO > 0) && d.latencyPredictor != nil {
+		reqCtx.TargetPod.RunningRequests.Add(reqCtx.Request.Headers[requtil.RequestIdHeaderKey], reqCtx.SchedulingRequest.TTFTSLO)
+	}
 	reqCtx.TargetEndpoint = endpoint
 
 	d.runPreRequestPlugins(ctx, reqCtx.SchedulingRequest, result, targetPort)
@@ -432,7 +471,7 @@ func (d *Director) HandleResponseHeaders(ctx context.Context, reqCtx *handlers.R
 
 func (d *Director) HandleResponseBodyChunk(ctx context.Context, reqCtx *handlers.RequestContext) error {
 	logger := log.FromContext(ctx).WithValues("stage", "bodyChunk")
-	logger.V(logutil.DEBUG).Info("Entering HandleResponseBodyChunk")
+	logger.V(logutil.TRACE).Info("Entering HandleResponseBodyChunk")
 
 	if d.latencyPredictor == nil || reqCtx.SchedulingResult == nil {
 		logger.V(logutil.DEBUG).Info("Skipping body-chunk logic; predictor or scheduling missing")
@@ -447,7 +486,7 @@ func (d *Director) HandleResponseBodyChunk(ctx context.Context, reqCtx *handlers
 		ProcessTokenForLatencyPrediction(ctx, d.latencyPredictor, reqCtx, now)
 	}
 
-	logger.V(logutil.DEBUG).Info("Exiting HandleResponseBodyChunk")
+	logger.V(logutil.TRACE).Info("Exiting HandleResponseBodyChunk")
 	return nil
 
 }

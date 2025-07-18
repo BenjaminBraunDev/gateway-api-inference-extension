@@ -23,7 +23,35 @@ type RequestPriorityQueue struct {
 func NewRequestPriorityQueue() *RequestPriorityQueue {
 	return &RequestPriorityQueue{
 		lookup: make(map[string]*Request),
+		items:  []*Request{},
 	}
+}
+
+// Clone creates a deep copy of the priority queue.
+// The new queue is completely independent of the original.
+func (pq *RequestPriorityQueue) Clone() *RequestPriorityQueue {
+	// Initialize a new priority queue with pre-allocated capacity.
+	clonedPq := &RequestPriorityQueue{
+		items:  make([]*Request, len(pq.items)),
+		lookup: make(map[string]*Request, len(pq.lookup)),
+	}
+
+	// Iterate through the original items to create deep copies.
+	for i, oldItem := range pq.items {
+		// Create a new Request struct, copying all values.
+		newItem := &Request{
+			ID:    oldItem.ID,
+			TPOT:  oldItem.TPOT,
+			index: oldItem.index,
+		}
+
+		// Assign the new item to the cloned queue's items slice.
+		clonedPq.items[i] = newItem
+		// Update the lookup map in the cloned queue to point to the new item.
+		clonedPq.lookup[newItem.ID] = newItem
+	}
+
+	return clonedPq
 }
 
 // Len is the number of items in the queue.

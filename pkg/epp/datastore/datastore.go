@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 	podutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/pod"
@@ -253,6 +254,9 @@ func (ds *datastore) PodList(predicate func(backendmetrics.PodMetrics) bool) []b
 
 	ds.pods.Range(func(k, v any) bool {
 		pm := v.(backendmetrics.PodMetrics)
+		if pm.GetPod().RunningRequests == nil {
+			pm.GetPod().RunningRequests = backend.NewRequestPriorityQueue()
+		}
 		if predicate(pm) {
 			res = append(res, pm)
 		}

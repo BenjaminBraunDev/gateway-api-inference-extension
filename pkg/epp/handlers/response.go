@@ -71,7 +71,9 @@ func (s *StreamingServer) HandleResponseBodyModelStreaming(ctx context.Context, 
 		resp := parseRespForUsage(ctx, responseText)
 		// If the response is finished, we need to update the running requests on the target pod.
 		targetPod := reqCtx.TargetPod
-		targetPod.RunningRequests.Remove(reqCtx.Request.Headers[requtil.RequestIdHeaderKey])
+		if reqCtx.SchedulingRequest.TTFTSLO > 0 && reqCtx.SchedulingRequest.AvgTPOTSLO > 0 {
+			targetPod.RunningRequests.Remove(reqCtx.Request.Headers[requtil.RequestIdHeaderKey])
+		}
 		reqCtx.Usage = resp.Usage
 		metrics.RecordInputTokens(reqCtx.Model, reqCtx.ResolvedTargetModel, resp.Usage.PromptTokens)
 		metrics.RecordOutputTokens(reqCtx.Model, reqCtx.ResolvedTargetModel, resp.Usage.CompletionTokens)

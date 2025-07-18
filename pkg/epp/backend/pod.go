@@ -49,7 +49,8 @@ func (p *Pod) Clone() *Pod {
 			Name:      p.NamespacedName.Name,
 			Namespace: p.NamespacedName.Namespace,
 		},
-		Address: p.Address,
-		Labels:  clonedLabels,
+		Address:         p.Address,
+		Labels:          clonedLabels,
+		RunningRequests: p.RunningRequests.Clone(),
 	}
 }
