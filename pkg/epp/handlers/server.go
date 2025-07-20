@@ -111,7 +111,7 @@ type RequestContext struct {
 
 	TTFT                       float64
 	PredictedTTFT              float64
-	PredictedTTFTForScheduling float64
+	PredictedTTFTForScheduling []float64
 	PredictedTPOTForScheduling []float64
 
 	PredictedTPOTObservations []float64
