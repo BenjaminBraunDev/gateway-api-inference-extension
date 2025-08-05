@@ -52,6 +52,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics/collectors"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol/plugins/slorequest"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/saturationdetector"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
@@ -329,6 +330,12 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
+	err = r.parseConfiguration(ctx)
+	if err != nil {
+		setupLog.Error(err, "Failed to parse the configuration")
+		return err
+	}
+
 	// ===================================================================
 	// == Latency Predictor Integration
 	// ===================================================================
@@ -337,7 +344,6 @@ func (r *Runner) Run(ctx context.Context) error {
 		setupLog.Info("Latency predictor is enabled. Initializing...")
 		predictor = latencypredictor.New(latencypredictor.ConfigFromEnv(), ctrl.Log.WithName("latency-predictor"))
 
-		// For the runnable, you'll need to type assert back to the concrete type
 		concretePredictor := predictor.(*latencypredictor.Predictor)
 		if err := mgr.Add(runnable.NoLeaderElection(&predictorRunnable{predictor: concretePredictor})); err != nil {
 			setupLog.Error(err, "Failed to register latency predictor runnable")
@@ -439,8 +445,11 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	saturationDetector := saturationdetector.NewDetector(sdConfig, datastore, setupLog)
 
-	// Pass the predictor instance to the Director. It will be nil if disabled.
-	director := requestcontrol.NewDirectorWithConfig(datastore, scheduler, saturationDetector, r.requestControlConfig, predictor)
+	if *enableLatencyPredictor {
+		r.requestControlConfig.AddPlugins(slorequest.New(datastore, predictor))
+	}
+
+	director := requestcontrol.NewDirectorWithConfig(datastore, scheduler, saturationDetector, r.requestControlConfig)
 
 	// --- Setup ExtProc Server Runner ---
 	serverRunner := &runserver.ExtProcServerRunner{
@@ -470,13 +479,11 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	// Register ext-proc server.
 	if err := registerExtProcServer(mgr, serverRunner, ctrl.Log.WithName("ext-proc")); err != nil {
 		return err
 	}
 
 	// --- Start Manager ---
-	// This blocks until a signal is received.
 	setupLog.Info("Controller manager starting")
 	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "Error starting controller manager")
@@ -538,16 +545,21 @@ func (r *Runner) initializeScheduler(datastore datastore.Datastore, predictor *l
 		return scheduling.NewSchedulerWithConfig(r.schedulerConfig), nil
 	}
 
-	// otherwise, no one configured from outside scheduler config. use existing configuration
 	scheduler := scheduling.NewScheduler()
 	if schedulerV2 {
-		queueScorerWeight := envutil.GetEnvInt("QUEUE_SCORE_WEIGHT", scorer.DefaultQueueScorerWeight, setupLog)
-		kvCacheScorerWeight := envutil.GetEnvInt("KV_CACHE_SCORE_WEIGHT", scorer.DefaultKVCacheScorerWeight, setupLog)
-
-		schedulerProfile := framework.NewSchedulerProfile().
-			WithScorers(framework.NewWeightedScorer(scorer.NewQueueScorer(), queueScorerWeight),
-				framework.NewWeightedScorer(scorer.NewKVCacheScorer(), kvCacheScorerWeight)).
-			WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
+		var schedulerProfile *framework.SchedulerProfile
+		if *enableLatencyPredictor {
+			// SLO-aware profile
+			schedulerProfile = framework.NewSchedulerProfile().
+				WithScorers(framework.NewWeightedScorer(scorer.NewSLOScorer(predictor, datastore), 1)).
+				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
+		} else {
+			// Default profile
+			schedulerProfile = framework.NewSchedulerProfile().
+				WithScorers(framework.NewWeightedScorer(scorer.NewQueueScorer(), envutil.GetEnvInt("QUEUE_SCORE_WEIGHT", scorer.DefaultQueueScorerWeight, setupLog)),
+					framework.NewWeightedScorer(scorer.NewKVCacheScorer(), envutil.GetEnvInt("KV_CACHE_SCORE_WEIGHT", scorer.DefaultKVCacheScorerWeight, setupLog))).
+				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
+		}
 
 		if prefixCacheScheduling {
 			prefixScorerWeight := envutil.GetEnvInt("PREFIX_CACHE_SCORE_WEIGHT", prefix.DefaultScorerWeight, setupLog)
@@ -556,7 +568,7 @@ func (r *Runner) initializeScheduler(datastore datastore.Datastore, predictor *l
 			}
 		}
 
-		schedulerConfig := scheduling.NewSchedulerConfig(profile.NewSingleProfileHandler(), map[string]*framework.SchedulerProfile{"schedulerv2": schedulerProfile})
+		schedulerConfig := scheduling.NewSchedulerConfig(profile.NewSingleProfileHandler(), map[string]*framework.SchedulerProfile{"default": schedulerProfile})
 		scheduler = scheduling.NewSchedulerWithConfig(schedulerConfig)
 	}
 
@@ -593,7 +605,6 @@ func (r *Runner) parseConfiguration(ctx context.Context) error {
 }
 
 func initLogging(opts *zap.Options) {
-	// Unless -zap-log-level is explicitly set, use -v
 	useV := true
 	flag.Visit(func(f *flag.Flag) {
 		if f.Name == "zap-log-level" {
@@ -601,7 +612,6 @@ func initLogging(opts *zap.Options) {
 		}
 	})
 	if useV {
-		// See https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/log/zap#Options.Level
 		lvl := -1 * (*logVerbosity)
 		opts.Level = uberzap.NewAtomicLevelAt(zapcore.Level(int8(lvl)))
 	}
@@ -666,8 +676,6 @@ func verifyMetricMapping(mapping backendmetrics.MetricMapping, logger logr.Logge
 	}
 }
 
-// setupPprofHandlers only implements the pre-defined profiles:
-// https://cs.opensource.google/go/go/+/refs/tags/go1.24.4:src/runtime/pprof/pprof.go;l=108
 func setupPprofHandlers(mgr ctrl.Manager) error {
 	var err error
 	profiles := []string{
@@ -696,47 +704,6 @@ type predictorRunnable struct {
 	predictor *latencypredictor.Predictor
 }
 
-// Start begins the predictor's background processes and blocks until the context is cancelled.
-func (p *predictorRunnable) Start(ctx context.Context) error {
-	setupLog.Info("Starting latency predictor...")
-	p.predictor.Start(ctx)
-	<-ctx.Done()
-	setupLog.Info("Stopping latency predictor...")
-	p.predictor.Stop()
-	return nil
-}
-
-// setupPprofHandlers only implements the pre-defined profiles:
-// https://cs.opensource.google/go/go/+/refs/tags/go1.24.4:src/runtime/pprof/pprof.go;l=108
-func setupPprofHandlers(mgr ctrl.Manager) error {
-	var err error
-	profiles := []string{
-		"heap",
-		"goroutine",
-		"allocs",
-		"threadcreate",
-		"block",
-		"mutex",
-	}
-	for _, p := range profiles {
-		err = mgr.AddMetricsServerExtraHandler("/debug/pprof/"+p, pprof.Handler(p))
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ===================================================================
-// == Latency Predictor Plugin and Helpers
-// ===================================================================
-
-// predictorRunnable implements controller-runtime's Runnable interface to manage the predictor's lifecycle.
-type predictorRunnable struct {
-	predictor *latencypredictor.Predictor
-}
-
-// Start begins the predictor's background processes and blocks until the context is cancelled.
 func (p *predictorRunnable) Start(ctx context.Context) error {
 	setupLog.Info("Starting latency predictor...")
 	p.predictor.Start(ctx)
