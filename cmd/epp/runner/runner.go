@@ -45,6 +45,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics/collectors"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol/plugins/slorequest"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/saturationdetector"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
@@ -257,11 +258,6 @@ func (r *Runner) Run(ctx context.Context) error {
 	customCollectors := []prometheus.Collector{collectors.NewInferencePoolMetricsCollector(datastore)}
 	metrics.Register(customCollectors...)
 	metrics.RecordInferenceExtensionInfo()
-	// Register metrics handler.
-	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
-	// More info:
-	// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.1/pkg/metrics/server
-	// - https://book.kubebuilder.io/reference/metrics.html
 	metricsServerOptions := metricsserver.Options{
 		BindAddress:    fmt.Sprintf(":%d", *metricsPort),
 		FilterProvider: filters.WithAuthenticationAndAuthorization,
@@ -296,7 +292,6 @@ func (r *Runner) Run(ctx context.Context) error {
 		setupLog.Info("Latency predictor is enabled. Initializing...")
 		predictor = latencypredictor.New(latencypredictor.ConfigFromEnv(), ctrl.Log.WithName("latency-predictor"))
 
-		// For the runnable, you'll need to type assert back to the concrete type
 		concretePredictor := predictor.(*latencypredictor.Predictor)
 		if err := mgr.Add(runnable.NoLeaderElection(&predictorRunnable{predictor: concretePredictor})); err != nil {
 			setupLog.Error(err, "Failed to register latency predictor runnable")
@@ -304,18 +299,21 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	} else {
 		setupLog.Info("Latency predictor is disabled.")
-		predictor = nil // This will be a true nil interface
 	}
 
 	// ===================================================================
 	// --- Initialize Core EPP Components ---
-	scheduler, err := r.initializeScheduler()
+	scheduler, err := r.initializeScheduler(predictor, datastore)
 	if err != nil {
 		setupLog.Error(err, "Failed to create scheduler")
 		return err
 	}
 
 	saturationDetector := saturationdetector.NewDetector(sdConfig, datastore, ctrl.Log)
+
+	if *enableLatencyPredictor {
+		r.requestControlConfig.AddPlugins(slorequest.New(datastore))
+	}
 
 	director := requestcontrol.NewDirectorWithConfig(datastore, scheduler, saturationDetector, r.requestControlConfig, predictor)
 
@@ -340,18 +338,15 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 
 	// --- Add Runnables to Manager ---
-	// Register health server.
 	if err := registerHealthServer(mgr, ctrl.Log.WithName("health"), datastore, *grpcHealthPort); err != nil {
 		return err
 	}
 
-	// Register ext-proc server.
 	if err := registerExtProcServer(mgr, serverRunner, ctrl.Log.WithName("ext-proc")); err != nil {
 		return err
 	}
 
 	// --- Start Manager ---
-	// This blocks until a signal is received.
 	setupLog.Info("Controller manager starting")
 	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "Error starting controller manager")
@@ -361,30 +356,35 @@ func (r *Runner) Run(ctx context.Context) error {
 	return nil
 }
 
-func (r *Runner) initializeScheduler() (*scheduling.Scheduler, error) {
+func (r *Runner) initializeScheduler(predictor latencypredictor.PredictorInterface, datastore datastore.Datastore) (*scheduling.Scheduler, error) {
 	if r.schedulerConfig != nil {
 		return scheduling.NewSchedulerWithConfig(r.schedulerConfig), nil
 	}
 
-	// otherwise, no one configured from outside scheduler config. use existing configuration
 	scheduler := scheduling.NewScheduler()
 	if schedulerV2 {
-		queueScorerWeight := envutil.GetEnvInt("QUEUE_SCORE_WEIGHT", scorer.DefaultQueueScorerWeight, setupLog)
-		kvCacheScorerWeight := envutil.GetEnvInt("KV_CACHE_SCORE_WEIGHT", scorer.DefaultKVCacheScorerWeight, setupLog)
-
-		schedulerProfile := framework.NewSchedulerProfile().
-			WithScorers(framework.NewWeightedScorer(scorer.NewQueueScorer(), queueScorerWeight),
-				framework.NewWeightedScorer(scorer.NewKVCacheScorer(), kvCacheScorerWeight)).
-			WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
+		var schedulerProfile *framework.SchedulerProfile
+		if *enableLatencyPredictor {
+			// SLO-aware profile
+			schedulerProfile = framework.NewSchedulerProfile().
+				WithScorers(framework.NewWeightedScorer(scorer.NewSLOScorer(predictor, datastore), 1)).
+				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
+		} else {
+			// Default profile
+			schedulerProfile = framework.NewSchedulerProfile().
+				WithScorers(framework.NewWeightedScorer(scorer.NewQueueScorer(), envutil.GetEnvInt("QUEUE_SCORE_WEIGHT", scorer.DefaultQueueScorerWeight, setupLog)),
+					framework.NewWeightedScorer(scorer.NewKVCacheScorer(), envutil.GetEnvInt("KV_CACHE_SCORE_WEIGHT", scorer.DefaultKVCacheScorerWeight, setupLog))).
+				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
+		}
 
 		if prefixCacheScheduling {
 			prefixScorerWeight := envutil.GetEnvInt("PREFIX_CACHE_SCORE_WEIGHT", prefix.DefaultScorerWeight, setupLog)
 			if err := schedulerProfile.AddPlugins(framework.NewWeightedScorer(prefix.New(loadPrefixCacheConfig()), prefixScorerWeight)); err != nil {
-				return nil, fmt.Errorf("Failed to register scheduler plugins - %w", err)
+				return nil, fmt.Errorf("failed to register scheduler plugins - %w", err)
 			}
 		}
 
-		schedulerConfig := scheduling.NewSchedulerConfig(profile.NewSingleProfileHandler(), map[string]*framework.SchedulerProfile{"schedulerv2": schedulerProfile})
+		schedulerConfig := scheduling.NewSchedulerConfig(profile.NewSingleProfileHandler(), map[string]*framework.SchedulerProfile{"default": schedulerProfile})
 		scheduler = scheduling.NewSchedulerWithConfig(schedulerConfig)
 	}
 
@@ -397,13 +397,13 @@ func (r *Runner) initializeScheduler() (*scheduling.Scheduler, error) {
 
 func (r *Runner) parseConfiguration(ctx context.Context) error {
 	if *configText == "" && *configFile == "" {
-		return nil // configuring through code, not through file
+		return nil
 	}
 
 	var configBytes []byte
 	if *configText != "" {
 		configBytes = []byte(*configText)
-	} else if *configFile != "" { // if config was specified through a file
+	} else if *configFile != "" {
 		var err error
 		configBytes, err = os.ReadFile(*configFile)
 		if err != nil {
@@ -422,14 +422,12 @@ func (r *Runner) parseConfiguration(ctx context.Context) error {
 		return fmt.Errorf("failed to create Scheduler configuration - %w", err)
 	}
 
-	// Add requestControl plugins
 	r.requestControlConfig.AddPlugins(handle.GetAllPlugins()...)
 
 	return nil
 }
 
 func initLogging(opts *zap.Options) {
-	// Unless -zap-log-level is explicitly set, use -v
 	useV := true
 	flag.Visit(func(f *flag.Flag) {
 		if f.Name == "zap-log-level" {
@@ -437,7 +435,6 @@ func initLogging(opts *zap.Options) {
 		}
 	})
 	if useV {
-		// See https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/log/zap#Options.Level
 		lvl := -1 * (*logVerbosity)
 		opts.Level = uberzap.NewAtomicLevelAt(zapcore.Level(int8(lvl)))
 	}
@@ -456,7 +453,6 @@ func loadPrefixCacheConfig() prefix.Config {
 	}
 }
 
-// registerExtProcServer adds the ExtProcServerRunner as a Runnable to the manager.
 func registerExtProcServer(mgr manager.Manager, runner *runserver.ExtProcServerRunner, logger logr.Logger) error {
 	if err := mgr.Add(runner.AsRunnable(logger)); err != nil {
 		setupLog.Error(err, "Failed to register ext-proc gRPC server runnable")
@@ -466,7 +462,6 @@ func registerExtProcServer(mgr manager.Manager, runner *runserver.ExtProcServerR
 	return nil
 }
 
-// registerHealthServer adds the Health gRPC server as a Runnable to the given manager.
 func registerHealthServer(mgr manager.Manager, logger logr.Logger, ds datastore.Datastore, port int) error {
 	srv := grpc.NewServer()
 	healthPb.RegisterHealthServer(srv, &healthServer{
@@ -504,8 +499,6 @@ func verifyMetricMapping(mapping backendmetrics.MetricMapping, logger logr.Logge
 	}
 }
 
-// setupPprofHandlers only implements the pre-defined profiles:
-// https://cs.opensource.google/go/go/+/refs/tags/go1.24.4:src/runtime/pprof/pprof.go;l=108
 func setupPprofHandlers(mgr ctrl.Manager) error {
 	var err error
 	profiles := []string{
@@ -525,16 +518,10 @@ func setupPprofHandlers(mgr ctrl.Manager) error {
 	return nil
 }
 
-// ===================================================================
-// == Latency Predictor Plugin and Helpers
-// ===================================================================
-
-// predictorRunnable implements controller-runtime's Runnable interface to manage the predictor's lifecycle.
 type predictorRunnable struct {
 	predictor *latencypredictor.Predictor
 }
 
-// Start begins the predictor's background processes and blocks until the context is cancelled.
 func (p *predictorRunnable) Start(ctx context.Context) error {
 	setupLog.Info("Starting latency predictor...")
 	p.predictor.Start(ctx)
