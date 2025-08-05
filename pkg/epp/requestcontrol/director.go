@@ -28,9 +28,8 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/google/uuid"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	"sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
@@ -123,9 +122,6 @@ type Choice struct {
 // Scheduler defines the interface required by the Director for scheduling.
 type Scheduler interface {
 	Schedule(ctx context.Context, request *schedulingtypes.LLMRequest, candidatePods []schedulingtypes.Pod) (result *schedulingtypes.SchedulingResult, err error)
-
-	// CycleState returns the current cycle state for the scheduler.
-	GetCycleState() *schedulingtypes.CycleState
 }
 
 // SaturationDetector provides a signal indicating whether the backends are considered saturated.
@@ -134,17 +130,11 @@ type SaturationDetector interface {
 }
 
 func NewDirectorWithConfig(datastore datastore.Datastore, scheduler Scheduler, saturationDetector SaturationDetector, config *Config, predictor latencypredictor.PredictorInterface) *Director {
-	var predictionScorer *PredictionScorer
-	if predictor != nil {
-		predictionScorer = NewPredictionScorer(predictor)
-	}
-
 	return &Director{
 		datastore:           datastore,
 		scheduler:           scheduler,
 		saturationDetector:  saturationDetector,
 		latencyPredictor:    predictor,
-		predictionScorer:    predictionScorer,
 		preRequestPlugins:   config.preRequestPlugins,
 		postResponsePlugins: config.postResponsePlugins,
 	}
@@ -156,7 +146,6 @@ type Director struct {
 	scheduler           Scheduler
 	saturationDetector  SaturationDetector
 	latencyPredictor    latencypredictor.PredictorInterface
-	predictionScorer    *PredictionScorer
 	preRequestPlugins   []PreRequest
 	postResponsePlugins []PostResponse
 }
@@ -210,17 +199,15 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 		requestCriticality = *modelObj.Spec.Criticality
 	}
 
-	// get request slos
 	// Get Request SLOs from request header
-	ttftSLO, foundTTFTSLO, err := parseFloatHeader(reqCtx, "ttft_slo")
+	ttftSLO, _, err := parseFloatHeader(reqCtx, "ttft_slo")
 	if err != nil {
 		return reqCtx, errutil.Error{Code: errutil.BadRequest, Msg: fmt.Sprintf("ttft_slo must be a float: %v", err)}
 	}
-	avgTPOTSLO, foundTPOTSLO, err := parseFloatHeader(reqCtx, "avg_tpot_slo")
+	avgTPOTSLO, _, err := parseFloatHeader(reqCtx, "avg_tpot_slo")
 	if err != nil {
 		return reqCtx, errutil.Error{Code: errutil.BadRequest, Msg: fmt.Sprintf("avg_tpot_slo must be a float: %v", err)}
 	}
-	latencySLOProvided := foundTTFTSLO && foundTPOTSLO
 
 	// Prepare LLMRequest (needed for both saturation detection and Scheduler)
 	reqCtx.SchedulingRequest = &schedulingtypes.LLMRequest{
@@ -233,7 +220,6 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	}
 
 	logger = logger.WithValues("model", reqCtx.Model, "resolvedTargetModel", reqCtx.ResolvedTargetModel, "criticality", requestCriticality)
-
 	ctx = log.IntoContext(ctx, logger)
 	logger.V(logutil.DEBUG).Info("LLM request assembled")
 
@@ -253,29 +239,7 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 		return reqCtx, errutil.Error{Code: errutil.InferencePoolResourceExhausted, Msg: fmt.Errorf("failed to find target pod: %w", err).Error()}
 	}
 
-	// --- 4. Apply prediction-based scoring and filtering if available ---
-	if d.latencyPredictor != nil && d.predictionScorer != nil && latencySLOProvided {
-		logger.V(logutil.DEBUG).Info("Applying prediction-based scoring and filtering")
-		finalPod, err := d.applyPredictionScoring(ctx, reqCtx, candidatePods, result, requestCriticality)
-		if err != nil {
-			return reqCtx, err
-		}
-
-		if finalPod == nil {
-			return nil, errutil.Error{Code: errutil.InferencePoolResourceExhausted, Msg: fmt.Errorf("failed to find target pod: %w", err).Error()}
-		}
-
-		reqCtx.TargetPod = finalPod.GetPod()
-		// Update scheduling result with final pod selection //TODO will change with llm-d
-		result.ProfileResults[result.PrimaryProfileName] = &schedulingtypes.ProfileRunResult{
-			TargetPods: []schedulingtypes.Pod{finalPod},
-			RawScores:  map[string]map[schedulingtypes.Pod]float64{},
-		}
-	} else {
-		logger.V(logutil.DEBUG).Info("No prediction-based scoring available, using default scheduling result")
-	}
-
-	// --- 5. Prepare Request (Populates RequestContext and call PreRequest plugins) ---
+	// --- 4. Prepare Request (Populates RequestContext and call PreRequest plugins) ---
 	reqCtx, err = d.prepareRequest(ctx, reqCtx, result)
 	if err != nil {
 		return reqCtx, err
@@ -284,35 +248,12 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	return reqCtx, nil
 }
 
-func (d *Director) applyPredictionScoring(
-	ctx context.Context,
-	reqCtx *handlers.RequestContext,
-	candidatePods []schedulingtypes.Pod,
-	result *schedulingtypes.SchedulingResult,
-	requestCriticality v1alpha2.Criticality,
-) (schedulingtypes.Pod, error) {
-	logger := log.FromContext(ctx)
-
-	// Handle nil or empty scheduler result
-	if result == nil || len(result.ProfileResults) == 0 {
-		return nil, errutil.Error{Code: errutil.Internal, Msg: "scheduling result is nil or empty"}
-	}
-
-	// Score and filter pods based on prediction
-	validPod, err := d.predictionScorer.ScoreAndFilterPods(ctx, d.datastore, reqCtx, candidatePods, result, requestCriticality)
-	if err != nil {
-		return nil, err
-	}
-
-	logger.V(logutil.DEBUG).Info("Selected pod after prediction filtering", "pod", validPod.GetPod().String())
-	return validPod, nil
-}
-
 // admitRequest handles admission control to decide whether or not to accept the request
 // based on the request criticality and system saturation state.
 func (d *Director) admitRequest(ctx context.Context, requestCriticality v1alpha2.Criticality) error {
 	logger := log.FromContext(ctx)
 
+	// Skip saturation check for critical requests
 	if requestCriticality == v1alpha2.Critical {
 		logger.V(logutil.DEBUG).Info("Critical request bypassing saturation check.")
 		return nil
@@ -330,11 +271,6 @@ func (d *Director) admitRequest(ctx context.Context, requestCriticality v1alpha2
 }
 
 // getCandidatePodsForScheduling gets the list of relevant endpoints for the scheduling cycle from the datastore.
-// according to EPP protocol, if "x-gateway-destination-endpoint-subset" is set on the request metadata and specifies
-// a subset of endpoints, only these endpoints will be considered as candidates for the scheduler.
-// Snapshot pod metrics from the datastore to:
-// 1. Reduce concurrent access to the datastore.
-// 2. Ensure consistent data during the scheduling operation of a request between all scheduling cycles.
 func (d *Director) getCandidatePodsForScheduling(ctx context.Context, requestMetadata map[string]any) []schedulingtypes.Pod {
 	loggerTrace := log.FromContext(ctx).V(logutil.TRACE)
 
@@ -343,7 +279,6 @@ func (d *Director) getCandidatePodsForScheduling(ctx context.Context, requestMet
 		return d.toSchedulerPodMetrics(d.datastore.PodGetAll())
 	}
 
-	// Check if endpoint key is present in the subset map and ensure there is at least one value
 	endpointSubsetList, found := subsetMap[subsetHintKey].([]any)
 	if !found {
 		return d.toSchedulerPodMetrics(d.datastore.PodGetAll())
@@ -352,11 +287,8 @@ func (d *Director) getCandidatePodsForScheduling(ctx context.Context, requestMet
 		return []schedulingtypes.Pod{}
 	}
 
-	// Create a map of endpoint addresses for easy lookup
 	endpoints := make(map[string]bool)
 	for _, endpoint := range endpointSubsetList {
-		// Extract address from endpoint
-		// The endpoint is formatted as "<address>:<port>" (ex. "10.0.1.0:8080")
 		epStr := strings.Split(endpoint.(string), ":")[0]
 		endpoints[epStr] = true
 	}
@@ -375,33 +307,14 @@ func (d *Director) getCandidatePodsForScheduling(ctx context.Context, requestMet
 	return d.toSchedulerPodMetrics(podFitleredList)
 }
 
-// prepareRequest populates the RequestContext and calls the registered PreRequest plugins
-// for allowing plugging customized logic based on the scheduling result.
+// prepareRequest populates the RequestContext and calls the registered PreRequest plugins.
 func (d *Director) prepareRequest(ctx context.Context, reqCtx *handlers.RequestContext, result *schedulingtypes.SchedulingResult) (*handlers.RequestContext, error) {
 	logger := log.FromContext(ctx)
 	if result == nil || len(result.ProfileResults) == 0 {
 		return reqCtx, errutil.Error{Code: errutil.Internal, Msg: "empty scheduling results"}
 	}
-	// primary profile is used to set destination
-	// TODO should use multiple destinations according to epp protocol. current code assumes a single target
+
 	targetPod := result.ProfileResults[result.PrimaryProfileName].TargetPods[0].GetPod()
-	if (reqCtx.SchedulingRequest.TTFTSLO > 0 && reqCtx.SchedulingRequest.AvgTPOTSLO > 0) && d.latencyPredictor != nil{
-		//reqCtx.TargetPod.RunningRequests.Add(reqCtx.Request.Headers[requtil.RequestIdHeaderKey], reqCtx.SchedulingRequest.TTFTSLO)
-		// Do this:
-		podName := types.NamespacedName{
-			Name:      reqCtx.TargetPod.NamespacedName.Name,
-			Namespace: reqCtx.TargetPod.NamespacedName.Namespace,
-		}
-		if reqCtx.Request.Headers[requtil.RequestIdHeaderKey] == "" {
-			reqCtx.Request.Headers[requtil.RequestIdHeaderKey] =  uuid.New().String()
-		}
-		err := d.datastore.PodAddRequest(podName, reqCtx.Request.Headers[requtil.RequestIdHeaderKey], reqCtx.SchedulingRequest.AvgTPOTSLO)
-		if err != nil {
-			logger.V(logutil.DEBUG).Error(err, "Failed to add request to pod running queue", "podName", podName, "requestID", reqCtx.Request.Headers[requtil.RequestIdHeaderKey])
-			return reqCtx, errutil.Error{Code: errutil.Internal, Msg: fmt.Sprintf("failed to add request to pod running queue: %v", err)}
-		}
-		targetPod.RunningRequests, _ = d.datastore.PodGetRunningRequests(podName)
-	}
 
 	pool, err := d.datastore.PoolGet()
 	if err != nil {
@@ -414,13 +327,9 @@ func (d *Director) prepareRequest(ctx context.Context, reqCtx *handlers.RequestC
 
 	reqCtx.TargetPod = targetPod
 	reqCtx.TargetEndpoint = endpoint
+	reqCtx.SchedulingResult = result
 
 	d.runPreRequestPlugins(ctx, reqCtx.SchedulingRequest, result, targetPort)
-	reqCtx.SchedulingResult = result
-	reqCtx.LastSeenMetrics = make(map[string]*backendmetrics.MetricsState)
-	RefreshLastSeenMetrics(ctx, reqCtx)
-
-
 
 	return reqCtx, nil
 }
@@ -430,7 +339,6 @@ func (d *Director) toSchedulerPodMetrics(pods []backendmetrics.PodMetrics) []sch
 	for i, pod := range pods {
 		pm[i] = &schedulingtypes.PodMetrics{Pod: pod.GetPod().Clone(), MetricsState: pod.GetMetrics().Clone()}
 	}
-
 	return pm
 }
 
@@ -445,7 +353,6 @@ func (d *Director) HandleResponseHeaders(ctx context.Context, reqCtx *handlers.R
 	}
 	d.runPostResponsePlugins(ctx, reqCtx.SchedulingRequest, response, reqCtx.TargetPod)
 
-	// Skip if no predictor or no scheduling info
 	if d.latencyPredictor == nil || reqCtx.SchedulingResult == nil {
 		logger.V(logutil.DEBUG).Info("Skipping header prediction; predictor or scheduling missing")
 		return reqCtx, nil
@@ -477,29 +384,15 @@ func (d *Director) HandleResponseBodyChunk(ctx context.Context, reqCtx *handlers
 
 	logger.V(logutil.TRACE).Info("Exiting HandleResponseBodyChunk")
 	return nil
-
-}
-
-func (d *Director) GetRandomPod() *backend.Pod {
-	pods := d.datastore.PodGetAll()
-	if len(pods) == 0 {
-		return nil
-	}
-	number := rand.Intn(len(pods))
-	pod := pods[number]
-	return pod.GetPod()
 }
 
 func RandomWeightedDraw(logger logr.Logger, model *v1alpha2.InferenceModel, seed int64) string {
-	// TODO: after we are down to 1 server implementation, make these methods a part of the struct
-	// and handle random seeding on the struct.
 	source := rand.NewSource(rand.Int63())
 	if seed > 0 {
 		source = rand.NewSource(seed)
 	}
 	r := rand.New(source)
 
-	// all the weight values are nil, then we should return random model name
 	if model.Spec.TargetModels[0].Weight == nil {
 		index := r.Int31n(int32(len(model.Spec.TargetModels)))
 		return model.Spec.TargetModels[index].Name
@@ -511,7 +404,6 @@ func RandomWeightedDraw(logger logr.Logger, model *v1alpha2.InferenceModel, seed
 	}
 	logger.V(logutil.TRACE).Info("Weights for model computed", "model", model.Name, "weights", weights)
 	randomVal := r.Int31n(weights)
-	// TODO: optimize this without using loop
 	for _, model := range model.Spec.TargetModels {
 		if randomVal < *model.Weight {
 			return model.Name
@@ -547,4 +439,14 @@ func (d *Director) IsPredictorAvailable() bool {
 
 func (d *Director) GetDatastore() datastore.Datastore {
 	return d.datastore
+}
+
+func (d *Director) GetRandomPod() *backend.Pod {
+	pods := d.datastore.PodGetAll()
+	if len(pods) == 0 {
+		return nil
+	}
+	source := rand.NewSource(time.Now().UnixNano())
+	r := rand.New(source)
+	return pods[r.Intn(len(pods))].GetPod()
 }
