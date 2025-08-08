@@ -48,11 +48,11 @@ func NewFakePodMetrics(k8sPod *corev1.Pod) *FakePodMetrics {
 		Labels:          make(map[string]string),
 		RunningRequests: backend.NewRequestPriorityQueue(),
 	}
-	
+
 	for k, v := range k8sPod.Labels {
 		pod.Labels[k] = v
 	}
-	
+
 	return &FakePodMetrics{
 		pod:             pod,
 		runningRequests: pod.RunningRequests,
@@ -176,7 +176,7 @@ func (f *FakePodMetricsClient) FetchMetrics(ctx context.Context, pod *backend.Po
 	if ok {
 		return nil, err
 	}
-	
+
 	f.resMu.RLock()
 	res, ok := f.Res[pod.NamespacedName]
 	f.resMu.RUnlock()
@@ -188,7 +188,7 @@ func (f *FakePodMetricsClient) FetchMetrics(ctx context.Context, pod *backend.Po
 			UpdateTime:    time.Now(),
 		}, nil
 	}
-	
+
 	log.FromContext(ctx).V(logutil.VERBOSE).Info("Fetching metrics for pod", "existing", existing, "new", res)
 	return res.Clone(), nil
 }

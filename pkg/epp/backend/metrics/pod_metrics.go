@@ -60,10 +60,10 @@ func (pm *podMetrics) String() string {
 	if pod != nil && pod.RunningRequests != nil {
 		requestCount = pod.RunningRequests.GetSize()
 	}
-	
-	return fmt.Sprintf("PodMetrics{%s, %s, %d running requests, waiting: %d, running: %d, kv_cache: %.2f%%}", 
-		pod.NamespacedName.String(), 
-		pod.Address, 
+
+	return fmt.Sprintf("PodMetrics{%s, %s, %d running requests, waiting: %d, running: %d, kv_cache: %.2f%%}",
+		pod.NamespacedName.String(),
+		pod.Address,
 		requestCount,
 		metrics.WaitingQueueSize,
 		metrics.RunningQueueSize,
@@ -140,35 +140,35 @@ func (pm *podMetrics) PeekRequestPriorityQueue() *backend.Request {
 }
 
 func (pm *podMetrics) UpdatePod(k8sPod *corev1.Pod) {
-    currentPod := pm.GetPod()
-    var existingQueue *backend.RequestPriorityQueue
-    if currentPod != nil {
-        existingQueue = currentPod.RunningRequests
-    }
-    
-    updatedPod := toInternalPod(k8sPod, existingQueue)
-    pm.pod.Store(updatedPod)
+	currentPod := pm.GetPod()
+	var existingQueue *backend.RequestPriorityQueue
+	if currentPod != nil {
+		existingQueue = currentPod.RunningRequests
+	}
+
+	updatedPod := toInternalPod(k8sPod, existingQueue)
+	pm.pod.Store(updatedPod)
 }
 func toInternalPod(pod *corev1.Pod, existingQueue *backend.RequestPriorityQueue) *backend.Pod {
-    labels := make(map[string]string, len(pod.GetLabels()))
-    for key, value := range pod.GetLabels() {
-        labels[key] = value
-    }
-    
-    queue := existingQueue
-    if queue == nil {
-        queue = backend.NewRequestPriorityQueue()
-    }
-    
-    return &backend.Pod{
-        NamespacedName: types.NamespacedName{
-            Name:      pod.Name,
-            Namespace: pod.Namespace,
-        },
-        Address:         pod.Status.PodIP,
-        Labels:          labels,
-        RunningRequests: queue,
-    }
+	labels := make(map[string]string, len(pod.GetLabels()))
+	for key, value := range pod.GetLabels() {
+		labels[key] = value
+	}
+
+	queue := existingQueue
+	if queue == nil {
+		queue = backend.NewRequestPriorityQueue()
+	}
+
+	return &backend.Pod{
+		NamespacedName: types.NamespacedName{
+			Name:      pod.Name,
+			Namespace: pod.Namespace,
+		},
+		Address:         pod.Status.PodIP,
+		Labels:          labels,
+		RunningRequests: queue,
+	}
 }
 
 // start starts a goroutine exactly once to periodically update metrics. The goroutine will be

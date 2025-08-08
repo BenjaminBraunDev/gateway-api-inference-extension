@@ -59,6 +59,7 @@ type Director interface {
 	HandleRequest(ctx context.Context, reqCtx *RequestContext) (*RequestContext, error)
 	HandleResponseHeaders(ctx context.Context, reqCtx *RequestContext) (*RequestContext, error)
 	HandleResponseBodyChunk(ctx context.Context, reqCtx *RequestContext) error
+	HandleResponseBodyComplete(ctx context.Context, reqCtx *RequestContext) error
 	HandleResponseTrailers(ctx context.Context, reqCtx *RequestContext) (*RequestContext, error)
 	GetRandomPod() *backend.Pod
 	IsPredictorAvailable() bool

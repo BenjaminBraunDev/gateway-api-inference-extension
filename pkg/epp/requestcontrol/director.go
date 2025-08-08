@@ -131,23 +131,25 @@ type SaturationDetector interface {
 
 func NewDirectorWithConfig(datastore datastore.Datastore, scheduler Scheduler, saturationDetector SaturationDetector, config *Config, predictor latencypredictor.PredictorInterface) *Director {
 	return &Director{
-		datastore:           datastore,
-		scheduler:           scheduler,
-		saturationDetector:  saturationDetector,
-		latencyPredictor:    predictor,
-		preRequestPlugins:   config.preRequestPlugins,
-		postResponsePlugins: config.postResponsePlugins,
+		datastore:                   datastore,
+		scheduler:                   scheduler,
+		saturationDetector:          saturationDetector,
+		latencyPredictor:            predictor,
+		preRequestPlugins:           config.preRequestPlugins,
+		postResponsePlugins:         config.postResponsePlugins,
+		postResponseCompletePlugins: config.postResponseCompletePlugins,
 	}
 }
 
 // Director orchestrates the request handling flow, including scheduling.
 type Director struct {
-	datastore           datastore.Datastore
-	scheduler           Scheduler
-	saturationDetector  SaturationDetector
-	latencyPredictor    latencypredictor.PredictorInterface
-	preRequestPlugins   []PreRequest
-	postResponsePlugins []PostResponse
+	datastore                   datastore.Datastore
+	scheduler                   Scheduler
+	saturationDetector          SaturationDetector
+	latencyPredictor            latencypredictor.PredictorInterface
+	preRequestPlugins           []PreRequest
+	postResponsePlugins         []PostResponse
+	postResponseCompletePlugins []PostResponseComplete
 }
 
 // HandleRequest orchestrates the request lifecycle:
@@ -327,9 +329,10 @@ func (d *Director) prepareRequest(ctx context.Context, reqCtx *handlers.RequestC
 
 	reqCtx.TargetPod = targetPod
 	reqCtx.TargetEndpoint = endpoint
-	reqCtx.SchedulingResult = result
-
 	d.runPreRequestPlugins(ctx, reqCtx.SchedulingRequest, result, targetPort)
+	reqCtx.SchedulingResult = result
+	reqCtx.LastSeenMetrics = make(map[string]*backendmetrics.MetricsState)
+	RefreshLastSeenMetrics(ctx, reqCtx)
 
 	return reqCtx, nil
 }
@@ -386,6 +389,26 @@ func (d *Director) HandleResponseBodyChunk(ctx context.Context, reqCtx *handlers
 	return nil
 }
 
+// HandleResponseBodyComplete is called when the response body is fully received.
+// It runs the PostResponseComplete plugins.
+func (d *Director) HandleResponseBodyComplete(ctx context.Context, reqCtx *handlers.RequestContext) error {
+	logger := log.FromContext(ctx).WithValues("stage", "bodyChunk")
+	logger.V(logutil.TRACE).Info("Entering HandleResponseBodyComplete")
+
+	if d.latencyPredictor == nil || reqCtx.SchedulingResult == nil {
+		logger.V(logutil.TRACE).Info("Skipping body-chunk logic; predictor or scheduling missing")
+		return nil
+	}
+	response := &Response{
+		RequestId: reqCtx.Request.Headers[requtil.RequestIdHeaderKey],
+		Headers:   reqCtx.Response.Headers,
+	}
+	d.runPostResponseCompletePlugins(ctx, reqCtx.SchedulingRequest, response, reqCtx.TargetPod)
+
+	logger.V(logutil.TRACE).Info("Exiting HandleResponseBodyComplete")
+	return nil
+}
+
 func RandomWeightedDraw(logger logr.Logger, model *v1alpha2.InferenceModel, seed int64) string {
 	source := rand.NewSource(rand.Int63())
 	if seed > 0 {
@@ -429,6 +452,15 @@ func (d *Director) runPostResponsePlugins(ctx context.Context, request *scheduli
 		log.FromContext(ctx).V(logutil.DEBUG).Info("Running post-response plugin", "plugin", plugin.TypedName().Type)
 		before := time.Now()
 		plugin.PostResponse(ctx, request, response, targetPod)
+		metrics.RecordRequestControlPluginProcessingLatency(PostResponsePluginType, plugin.TypedName().Type, time.Since(before))
+	}
+}
+
+func (d *Director) runPostResponseCompletePlugins(ctx context.Context, request *schedulingtypes.LLMRequest, response *Response, targetPod *backend.Pod) {
+	for _, plugin := range d.postResponseCompletePlugins {
+		log.FromContext(ctx).V(logutil.DEBUG).Info("Running post-response plugin", "plugin", plugin.TypedName().Type)
+		before := time.Now()
+		plugin.PostResponseComplete(ctx, request, response, targetPod)
 		metrics.RecordRequestControlPluginProcessingLatency(PostResponsePluginType, plugin.TypedName().Type, time.Since(before))
 	}
 }

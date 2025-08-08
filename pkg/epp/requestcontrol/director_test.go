@@ -210,8 +210,8 @@ func TestDirector_HandleRequest(t *testing.T) {
 					&schedulingtypes.ScoredPod{
 						Pod: &schedulingtypes.PodMetrics{
 							Pod: &backend.Pod{
-								Address:        "192.168.1.100",
-								NamespacedName: k8stypes.NamespacedName{Name: "pod1", Namespace: "default"},
+								Address:         "192.168.1.100",
+								NamespacedName:  k8stypes.NamespacedName{Name: "pod1", Namespace: "default"},
 								RunningRequests: &backend.RequestPriorityQueue{}, // Add empty queue
 								Labels:          map[string]string{"app": "inference"},
 							},
@@ -228,8 +228,8 @@ func TestDirector_HandleRequest(t *testing.T) {
 					&schedulingtypes.ScoredPod{
 						Pod: &schedulingtypes.PodMetrics{
 							Pod: &backend.Pod{
-								Address:        "192.168.1.100",
-								NamespacedName: k8stypes.NamespacedName{Name: "pod1", Namespace: "default"},
+								Address:         "192.168.1.100",
+								NamespacedName:  k8stypes.NamespacedName{Name: "pod1", Namespace: "default"},
 								RunningRequests: &backend.RequestPriorityQueue{}, // Add empty queue
 								Labels:          map[string]string{"app": "inference"},
 							},
@@ -241,8 +241,8 @@ func TestDirector_HandleRequest(t *testing.T) {
 						&schedulingtypes.ScoredPod{
 							Pod: &schedulingtypes.PodMetrics{
 								Pod: &backend.Pod{
-									Address:        "192.168.1.100",
-									NamespacedName: k8stypes.NamespacedName{Name: "pod1", Namespace: "default"},
+									Address:         "192.168.1.100",
+									NamespacedName:  k8stypes.NamespacedName{Name: "pod1", Namespace: "default"},
 									RunningRequests: &backend.RequestPriorityQueue{}, // Add empty queue
 									Labels:          map[string]string{"app": "inference"},
 								},
@@ -312,19 +312,19 @@ func TestDirector_HandleRequest(t *testing.T) {
 				TargetPod: &backend.Pod{
 					NamespacedName: types.NamespacedName{Namespace: "default", Name: "pod1"},
 					Address:        "192.168.1.100",
-					Labels:          map[string]string{"app": "inference"},
+					Labels:         map[string]string{"app": "inference"},
 				},
 				TargetEndpoint: "192.168.1.100:8000",
 			},
 			wantMutatedBodyModel: model,
 		},
 		{
-			name: "non-critical request dropped due to prediction SLO violation",
+			name: "non-critical request dropped due to saturation",
 			reqBodyMap: map[string]any{
 				"model":  modelSheddable,
 				"prompt": "test prompt",
 			},
-			mockSaturationDetector: &mockSaturationDetector{isSaturated: false},
+			mockSaturationDetector: &mockSaturationDetector{isSaturated: true},
 			schedulerMockSetup: func(m *mockScheduler) {
 				m.scheduleResults = defaultSuccessfulScheduleResults
 			},
@@ -340,12 +340,12 @@ func TestDirector_HandleRequest(t *testing.T) {
 			wantErrCode: errutil.InferencePoolResourceExhausted,
 		},
 		{
-			name: "critical request succeeds despite prediction SLO violation",
+			name: "critical request succeeds despite saturation",
 			reqBodyMap: map[string]any{
 				"model":  model, // Critical model
 				"prompt": "test prompt",
 			},
-			mockSaturationDetector: &mockSaturationDetector{isSaturated: false},
+			mockSaturationDetector: &mockSaturationDetector{isSaturated: true},
 			schedulerMockSetup: func(m *mockScheduler) {
 				m.scheduleResults = defaultSuccessfulScheduleResults
 			},
@@ -710,12 +710,12 @@ func TestDirector_HandleRequest_PredictionFiltering_Fixed(t *testing.T) {
 		wantMutatedBodyModel   string
 	}{
 		{
-			name: "non-critical request dropped due to prediction SLO violation",
+			name: "non-critical request dropped due to saturation",
 			reqBodyMap: map[string]any{
 				"model":  modelSheddable,
 				"prompt": "test prompt",
 			},
-			mockSaturationDetector: &mockSaturationDetector{isSaturated: false},
+			mockSaturationDetector: &mockSaturationDetector{isSaturated: true},
 			schedulerMockSetup: func(m *mockScheduler) {
 				m.scheduleResults = defaultSuccessfulScheduleResults
 			},
@@ -731,7 +731,7 @@ func TestDirector_HandleRequest_PredictionFiltering_Fixed(t *testing.T) {
 			wantErrCode: errutil.InferencePoolResourceExhausted,
 		},
 		{
-			name: "critical request succeeds despite prediction SLO violation",
+			name: "critical request succeeds despite saturation",
 			reqBodyMap: map[string]any{
 				"model":  model, // Critical model
 				"prompt": "test prompt",

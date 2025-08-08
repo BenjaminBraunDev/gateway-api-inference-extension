@@ -71,6 +71,7 @@ func (s *StreamingServer) HandleResponseBodyModelStreaming(ctx context.Context, 
 		reqCtx.Usage = resp.Usage
 		metrics.RecordInputTokens(reqCtx.Model, reqCtx.ResolvedTargetModel, resp.Usage.PromptTokens)
 		metrics.RecordOutputTokens(reqCtx.Model, reqCtx.ResolvedTargetModel, resp.Usage.CompletionTokens)
+		s.director.HandleResponseBodyComplete(ctx, reqCtx)
 	}
 	if s.director != nil && s.director.IsPredictorAvailable() {
 		s.director.HandleResponseBodyChunk(ctx, reqCtx)
