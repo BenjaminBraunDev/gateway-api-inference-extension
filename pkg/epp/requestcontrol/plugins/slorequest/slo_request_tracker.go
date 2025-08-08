@@ -42,7 +42,7 @@ type SLORequestTracker struct {
 }
 
 var _ requestcontrol.PreRequest = &SLORequestTracker{}
-var _ requestcontrol.PostResponse = &SLORequestTracker{}
+var _ requestcontrol.PostResponseComplete = &SLORequestTracker{}
 
 func New(datastore datastore.Datastore) *SLORequestTracker {
 	return &SLORequestTracker{
@@ -74,19 +74,20 @@ func (t *SLORequestTracker) PreRequest(ctx context.Context, request *scheduling_
 		Namespace: targetPod.NamespacedName.Namespace,
 	}
 
-	requestID := request.RequestId
-	if requestID == "" {
-		requestID = uuid.New().String()
-		request.Headers[requtil.RequestIdHeaderKey] = requestID
+	logger.V(logutil.DEBUG).Info("request ID for SLO tracking", "requestID", request.Headers[requtil.RequestIdHeaderKey], "podName", podName)
+	if request.Headers[requtil.RequestIdHeaderKey] == "" {
+		request.Headers[requtil.RequestIdHeaderKey] = uuid.New().String()
+		logger.V(logutil.DEBUG).Info("Generated new request ID for SLO tracking", "requestID", request.Headers[requtil.RequestIdHeaderKey])
+		logger.V(logutil.DEBUG).Info("request headers for SLO tracking", "requestHeaders", request.Headers)
 	}
 
-	err := t.datastore.PodAddRequest(podName, requestID, request.AvgTPOTSLO)
+	err := t.datastore.PodAddRequest(podName, request.Headers[requtil.RequestIdHeaderKey], request.AvgTPOTSLO)
 	if err != nil {
-		logger.V(logutil.DEBUG).Error(err, "SLORequestTracker: Failed to add request to pod running queue", "podName", podName, "requestID", requestID)
+		logger.V(logutil.DEBUG).Error(err, "SLORequestTracker: Failed to add request to pod running queue", "podName", podName, "requestID", request.Headers[requtil.RequestIdHeaderKey])
 	}
 }
 
-func (t *SLORequestTracker) PostResponse(ctx context.Context, request *scheduling_types.LLMRequest, response *requestcontrol.Response, targetPod *backend.Pod) {
+func (t *SLORequestTracker) PostResponseComplete(ctx context.Context, request *scheduling_types.LLMRequest, response *requestcontrol.Response, targetPod *backend.Pod) {
 	logger := log.FromContext(ctx)
 	if request.TTFTSLO == 0 || request.AvgTPOTSLO == 0 {
 		logger.V(logutil.DEBUG).Info("SLORequestTracker: Skipping PostResponse because no SLOs were provided.")
@@ -102,9 +103,8 @@ func (t *SLORequestTracker) PostResponse(ctx context.Context, request *schedulin
 		Name:      targetPod.NamespacedName.Name,
 		Namespace: targetPod.NamespacedName.Namespace,
 	}
-	requestID := request.RequestId
 
-	if err := t.datastore.PodRemoveRequest(podName, requestID); err != nil {
-		logger.V(logutil.DEBUG).Error(err, "SLORequestTracker: Failed to remove request from queue", "requestID", requestID)
+	if err := t.datastore.PodRemoveRequest(podName, request.Headers[requtil.RequestIdHeaderKey]); err != nil {
+		logger.V(logutil.DEBUG).Error(err, "SLORequestTracker: Failed to remove request from queue", "requestID", request.Headers[requtil.RequestIdHeaderKey])
 	}
 }

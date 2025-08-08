@@ -57,8 +57,6 @@ func (f *PodMetricsFactory) NewPodMetrics(parentCtx context.Context, in *corev1.
 	return pm
 }
 
-
-
 type PodMetrics interface {
 	GetPod() *backend.Pod
 	GetMetrics() *MetricsState

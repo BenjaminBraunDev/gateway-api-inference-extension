@@ -131,19 +131,15 @@ func (s *Scheduler) Schedule(ctx context.Context, request *types.LLMRequest, can
 		}
 	}
 
-
-
 	before := time.Now()
 	result, err := s.profileHandler.ProcessResults(ctx, cycleState, request, profileRunResults)
-	if result == nil{
+	if result == nil {
 		return nil, err
 	} else {
-			result.AllProfileRunResults = profileRunResults // store all profile run results in the result
-		}
-	
-	metrics.RecordSchedulerPluginProcessingLatency(framework.ProcessProfilesResultsType, s.profileHandler.TypedName().Type, time.Since(before))
+		result.AllProfileRunResults = profileRunResults // store all profile run results in the result
+	}
 
+	metrics.RecordSchedulerPluginProcessingLatency(framework.ProcessProfilesResultsType, s.profileHandler.TypedName().Type, time.Since(before))
 
 	return result, err
 }
-

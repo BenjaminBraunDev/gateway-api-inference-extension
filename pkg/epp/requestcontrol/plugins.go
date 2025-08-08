@@ -25,8 +25,9 @@ import (
 )
 
 const (
-	PreRequestPluginType   = "PreRequest"
-	PostResponsePluginType = "PostResponse"
+	PreRequestPluginType           = "PreRequest"
+	PostResponsePluginType         = "PostResponse"
+	PostResponseCompletePluginType = "PostResponse"
 )
 
 // PreRequest is called by the director after a getting result from scheduling layer and
@@ -41,4 +42,11 @@ type PreRequest interface {
 type PostResponse interface {
 	plugins.Plugin
 	PostResponse(ctx context.Context, request *types.LLMRequest, response *Response, targetPod *backend.Pod)
+}
+
+// PostResponseComplete is called by the director after a successful response was sent.
+// The given pod argument is the pod that served the request.
+type PostResponseComplete interface {
+	plugins.Plugin
+	PostResponseComplete(ctx context.Context, request *types.LLMRequest, response *Response, targetPod *backend.Pod)
 }

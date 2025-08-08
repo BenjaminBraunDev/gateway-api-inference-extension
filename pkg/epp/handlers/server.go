@@ -58,6 +58,7 @@ type Director interface {
 	HandleRequest(ctx context.Context, reqCtx *RequestContext) (*RequestContext, error)
 	HandleResponseHeaders(ctx context.Context, reqCtx *RequestContext) (*RequestContext, error)
 	HandleResponseBodyChunk(ctx context.Context, reqCtx *RequestContext) error
+	HandleResponseBodyComplete(ctx context.Context, reqCtx *RequestContext) error
 	GetRandomPod() *backend.Pod
 	IsPredictorAvailable() bool
 	GetDatastore() datastore.Datastore
@@ -102,26 +103,23 @@ type RequestContext struct {
 	Prompt                    string
 	GeneratedTokenCount       int
 
-	LastSeenMetrics          map[string]*backendmetrics.MetricsState
-	SchedulingResult          *schedulingtypes.SchedulingResult
-	SchedulingRequest         *schedulingtypes.LLMRequest
+	LastSeenMetrics   map[string]*backendmetrics.MetricsState
+	SchedulingResult  *schedulingtypes.SchedulingResult
+	SchedulingRequest *schedulingtypes.LLMRequest
 
 	RequestState         StreamRequestState
 	ModelServerStreaming bool
 
-
-	TTFT          float64
-	PredictedTTFT float64
-	PredictedTTFTForScheduling [] float64
+	TTFT                       float64
+	PredictedTTFT              float64
+	PredictedTTFTForScheduling []float64
 	PredictedTPOTForScheduling []float64
 
-	TokenSampler *requtil.TokenSampler
+	TokenSampler              *requtil.TokenSampler
 	PredictedTPOTObservations []float64
 	TPOTObservations          []float64
 	AvgTPOT                   float64
 	AvgPredictedTPOT          float64
-
-	
 
 	Response *Response
 

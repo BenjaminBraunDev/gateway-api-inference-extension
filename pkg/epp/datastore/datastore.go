@@ -29,8 +29,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
+	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 	podutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/pod"
 )
@@ -308,13 +308,13 @@ func (ds *datastore) PodAddRequest(podName types.NamespacedName, requestID strin
 	if !ok {
 		return fmt.Errorf("pod %s not found in datastore", podName)
 	}
-	
+
 	podMetrics := pm.(backendmetrics.PodMetrics)
 	runningRequests := podMetrics.GetRunningRequests()
 	if runningRequests == nil {
 		return fmt.Errorf("pod %s does not have running requests queue initialized", podName)
 	}
-	
+
 	if !runningRequests.Add(requestID, tpot) {
 		return fmt.Errorf("request %s already exists in pod %s", requestID, podName)
 	}
@@ -329,20 +329,20 @@ func (ds *datastore) PodRemoveRequest(podName types.NamespacedName, requestID st
 	if !ok {
 		return fmt.Errorf("pod %s not found in datastore", podName)
 	}
-	
+
 	podMetrics := pm.(backendmetrics.PodMetrics)
 	runningRequests := podMetrics.GetRunningRequests()
 	if runningRequests == nil {
 		return fmt.Errorf("pod %s does not have running requests queue initialized", podName)
 	}
-	
+
 	_, removed := runningRequests.Remove(requestID)
 	if !removed {
 		return fmt.Errorf("request %s not found in pod %s", requestID, podName)
 	}
 
 	fmt.Print("Removed request from pod: ", podName, " requestID: ", requestID, " current size: ", runningRequests.GetSize(), "\n")
-	
+
 	return nil
 }
 
@@ -351,17 +351,17 @@ func (ds *datastore) PodUpdateRequest(podName types.NamespacedName, requestID st
 	if !ok {
 		return fmt.Errorf("pod %s not found in datastore", podName)
 	}
-	
+
 	podMetrics := pm.(backendmetrics.PodMetrics)
 	runningRequests := podMetrics.GetRunningRequests()
 	if runningRequests == nil {
 		return fmt.Errorf("pod %s does not have running requests queue initialized", podName)
 	}
-	
+
 	if !runningRequests.Update(requestID, tpot) {
 		return fmt.Errorf("request %s not found in pod %s", requestID, podName)
 	}
-	
+
 	return nil
 }
 
@@ -370,13 +370,13 @@ func (ds *datastore) PodGetRunningRequests(podName types.NamespacedName) (*backe
 	if !ok {
 		return nil, fmt.Errorf("pod %s not found in datastore", podName)
 	}
-	
+
 	podMetrics := pm.(backendmetrics.PodMetrics)
 	runningRequests := podMetrics.GetRunningRequests()
 	if runningRequests == nil {
 		return nil, fmt.Errorf("pod %s does not have running requests queue initialized", podName)
 	}
-	
+
 	return runningRequests, nil
 }
 
@@ -385,13 +385,13 @@ func (ds *datastore) PodGetRequestCount(podName types.NamespacedName) (int, erro
 	if !ok {
 		return 0, fmt.Errorf("pod %s not found in datastore", podName)
 	}
-	
+
 	podMetrics := pm.(backendmetrics.PodMetrics)
 	runningRequests := podMetrics.GetRunningRequests()
 	if runningRequests == nil {
 		return 0, fmt.Errorf("pod %s does not have running requests queue initialized", podName)
 	}
-	
+
 	return runningRequests.GetSize(), nil
 }
 

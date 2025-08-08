@@ -144,7 +144,7 @@ func TestPodUpdatePreservesQueue(t *testing.T) {
 	updatedPod := pod1.DeepCopy()
 	updatedPod.Status.PodIP = "192.168.1.2"
 	updatedPod.Labels["new"] = "label"
-	
+
 	pm.UpdatePod(updatedPod)
 
 	// Queue should be preserved
@@ -168,7 +168,7 @@ func TestMetricsRefreshWithErrors(t *testing.T) {
 	defer pm.StopRefreshLoop()
 
 	namespacedName := types.NamespacedName{Name: pod1.Name, Namespace: pod1.Namespace}
-	
+
 	// Set an error for this pod
 	pmc.SetErr(map[types.NamespacedName]error{
 		namespacedName: fmt.Errorf("connection failed"),
@@ -217,7 +217,7 @@ func TestConcurrentRequestOperations(t *testing.T) {
 	const requestsPerGoroutine = 100
 
 	var wg sync.WaitGroup
-	
+
 	// Launch goroutines that add requests
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
