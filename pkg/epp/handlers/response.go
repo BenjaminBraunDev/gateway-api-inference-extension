@@ -72,9 +72,7 @@ func (s *StreamingServer) HandleResponseBodyModelStreaming(ctx context.Context, 
 		metrics.RecordOutputTokens(reqCtx.Model, reqCtx.ResolvedTargetModel, resp.Usage.CompletionTokens)
 		s.director.HandleResponseBodyComplete(ctx, reqCtx)
 	}
-	if s.director != nil && s.director.IsPredictorAvailable() {
-		s.director.HandleResponseBodyChunk(ctx, reqCtx)
-	}
+	s.director.HandleResponseBodyChunk(ctx, reqCtx)
 }
 
 func (s *StreamingServer) HandleResponseHeaders(ctx context.Context, reqCtx *RequestContext, resp *extProcPb.ProcessingRequest_ResponseHeaders) (*RequestContext, error) {

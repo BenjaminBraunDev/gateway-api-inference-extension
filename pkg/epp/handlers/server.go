@@ -60,7 +60,6 @@ type Director interface {
 	HandleResponseBodyChunk(ctx context.Context, reqCtx *RequestContext) error
 	HandleResponseBodyComplete(ctx context.Context, reqCtx *RequestContext) error
 	GetRandomPod() *backend.Pod
-	IsPredictorAvailable() bool
 	GetDatastore() datastore.Datastore
 }
 
@@ -110,16 +109,17 @@ type RequestContext struct {
 	RequestState         StreamRequestState
 	ModelServerStreaming bool
 
-	TTFT                       float64
-	PredictedTTFT              float64
+	TTFT             float64
+	PredictedTTFT    float64
+	AvgTPOT          float64
+	AvgPredictedTPOT float64
+
 	PredictedTTFTForScheduling []float64
 	PredictedTPOTForScheduling []float64
 
 	TokenSampler              *requtil.TokenSampler
-	PredictedTPOTObservations []float64
 	TPOTObservations          []float64
-	AvgTPOT                   float64
-	AvgPredictedTPOT          float64
+	PredictedTPOTObservations []float64
 
 	Response *Response
 

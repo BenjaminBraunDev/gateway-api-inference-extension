@@ -18,6 +18,7 @@ package slorequest
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"k8s.io/apimachinery/pkg/types"
@@ -25,6 +26,8 @@ import (
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/latencypredictorasync"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	scheduling_types "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -37,17 +40,21 @@ const (
 )
 
 type SLORequestTracker struct {
-	tn        plugins.TypedName
-	datastore datastore.Datastore
+	tn               plugins.TypedName
+	latencypredictor latencypredictorasync.PredictorInterface
+	datastore        datastore.Datastore
 }
 
 var _ requestcontrol.PreRequest = &SLORequestTracker{}
+var _ requestcontrol.PostResponse = &SLORequestTracker{}
+var _ requestcontrol.PostResponseChunk = &SLORequestTracker{}
 var _ requestcontrol.PostResponseComplete = &SLORequestTracker{}
 
-func New(datastore datastore.Datastore) *SLORequestTracker {
+func New(datastore datastore.Datastore, latencypredictor latencypredictorasync.PredictorInterface) *SLORequestTracker {
 	return &SLORequestTracker{
-		tn:        plugins.TypedName{Type: SLORequestTrackerPluginType, Name: SLORequestTrackerPluginType},
-		datastore: datastore,
+		tn:               plugins.TypedName{Type: SLORequestTrackerPluginType, Name: SLORequestTrackerPluginType},
+		latencypredictor: latencypredictor,
+		datastore:        datastore,
 	}
 }
 
@@ -87,7 +94,7 @@ func (t *SLORequestTracker) PreRequest(ctx context.Context, request *scheduling_
 	}
 }
 
-func (t *SLORequestTracker) PostResponseComplete(ctx context.Context, request *scheduling_types.LLMRequest, response *requestcontrol.Response, targetPod *backend.Pod) {
+func (t *SLORequestTracker) PostResponse(ctx context.Context, request *scheduling_types.LLMRequest, reqCtx *handlers.RequestContext, response *requestcontrol.Response, targetPod *backend.Pod) {
 	logger := log.FromContext(ctx)
 	if request.TTFTSLO == 0 || request.AvgTPOTSLO == 0 {
 		logger.V(logutil.DEBUG).Info("SLORequestTracker: Skipping PostResponse because no SLOs were provided.")
@@ -99,6 +106,60 @@ func (t *SLORequestTracker) PostResponseComplete(ctx context.Context, request *s
 		return
 	}
 
+	if t.latencypredictor == nil {
+		logger.V(logutil.DEBUG).Info("SLORequestTracker: Skipping PostResponse because no latency predictor in director.")
+		return
+	}
+	if err := requestcontrol.ProcessHeaderForLatencyPrediction(ctx, t.latencypredictor, reqCtx); err != nil {
+		logger.V(logutil.DEBUG).Error(err, "ProcessHeader in latencypredictor failed")
+	}
+
+}
+
+func (t *SLORequestTracker) PostResponseChunk(ctx context.Context, request *scheduling_types.LLMRequest, reqCtx *handlers.RequestContext, response *requestcontrol.Response, targetPod *backend.Pod) {
+	logger := log.FromContext(ctx)
+	if request.TTFTSLO == 0 || request.AvgTPOTSLO == 0 {
+		logger.V(logutil.DEBUG).Info("SLORequestTracker: Skipping PostResponse because no SLOs were provided.")
+		return
+	}
+
+	if targetPod == nil {
+		logger.V(logutil.DEBUG).Info("SLORequestTracker: Skipping PostResponse because no target pod was provided.")
+		return
+	}
+
+	if t.latencypredictor == nil || reqCtx.SchedulingResult == nil {
+		logger.V(logutil.DEBUG).Info("Skipping header prediction; predictor or scheduling missing")
+		return
+	}
+
+	now := time.Now()
+
+	if reqCtx.TTFT == 0 {
+		requestcontrol.ProcessFirstTokenForLatencyPrediction(ctx, t.latencypredictor, reqCtx, now)
+	} else {
+		requestcontrol.ProcessTokenForLatencyPrediction(ctx, t.latencypredictor, reqCtx, now)
+	}
+
+}
+
+func (t *SLORequestTracker) PostResponseComplete(ctx context.Context, request *scheduling_types.LLMRequest, response *requestcontrol.Response, targetPod *backend.Pod) {
+	logger := log.FromContext(ctx)
+
+	if request.TTFTSLO == 0 || request.AvgTPOTSLO == 0 {
+		logger.V(logutil.DEBUG).Info("SLORequestTracker: Skipping PostResponse because no SLOs were provided.")
+		return
+	}
+
+	if targetPod == nil {
+		logger.V(logutil.DEBUG).Info("SLORequestTracker: Skipping PostResponse because no target pod was provided.")
+		return
+	}
+	if t.latencypredictor == nil {
+		logger.V(logutil.DEBUG).Info("Skipping header prediction; predictor or scheduling missing")
+		return
+	}
+
 	podName := types.NamespacedName{
 		Name:      targetPod.NamespacedName.Name,
 		Namespace: targetPod.NamespacedName.Namespace,
@@ -107,4 +168,8 @@ func (t *SLORequestTracker) PostResponseComplete(ctx context.Context, request *s
 	if err := t.datastore.PodRemoveRequest(podName, request.Headers[requtil.RequestIdHeaderKey]); err != nil {
 		logger.V(logutil.DEBUG).Error(err, "SLORequestTracker: Failed to remove request from queue", "requestID", request.Headers[requtil.RequestIdHeaderKey])
 	}
+}
+
+func (t *SLORequestTracker) IsPredictorAvailable() bool {
+	return t.latencypredictor != nil
 }

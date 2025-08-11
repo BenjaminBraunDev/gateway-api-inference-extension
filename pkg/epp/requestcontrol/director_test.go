@@ -525,9 +525,9 @@ func TestDirector_HandleRequest(t *testing.T) {
 			if test.predictorMockSetup != nil {
 				mockPred = &mockPredictor{}
 				test.predictorMockSetup(mockPred)
-				director = NewDirectorWithConfig(ds, mockSched, test.mockSaturationDetector, NewConfig(), mockPred)
+				director = NewDirectorWithConfig(ds, mockSched, test.mockSaturationDetector, NewConfig())
 			} else {
-				director = NewDirectorWithConfig(ds, mockSched, test.mockSaturationDetector, NewConfig(), nil)
+				director = NewDirectorWithConfig(ds, mockSched, test.mockSaturationDetector, NewConfig())
 			}
 
 			reqCtx := &handlers.RequestContext{
@@ -789,9 +789,9 @@ func TestDirector_HandleRequest_PredictionFiltering_Fixed(t *testing.T) {
 			if test.predictorMockSetup != nil {
 				mockPred = &mockPredictor{}
 				test.predictorMockSetup(mockPred)
-				director = NewDirectorWithConfig(ds, mockSched, test.mockSaturationDetector, NewConfig(), mockPred)
+				director = NewDirectorWithConfig(ds, mockSched, test.mockSaturationDetector, NewConfig())
 			} else {
-				director = NewDirectorWithConfig(ds, mockSched, test.mockSaturationDetector, NewConfig(), nil)
+				director = NewDirectorWithConfig(ds, mockSched, test.mockSaturationDetector, NewConfig())
 			}
 
 			reqCtx := &handlers.RequestContext{
