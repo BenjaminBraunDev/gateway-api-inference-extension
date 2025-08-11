@@ -322,10 +322,10 @@ func (r *Runner) Run(ctx context.Context) error {
 	saturationDetector := saturationdetector.NewDetector(sdConfig, datastore, ctrl.Log)
 
 	if *enableLatencyPredictor {
-		r.requestControlConfig.AddPlugins(slorequest.New(datastore))
+		r.requestControlConfig.AddPlugins(slorequest.New(datastore, predictor))
 	}
 
-	director := requestcontrol.NewDirectorWithConfig(datastore, scheduler, saturationDetector, r.requestControlConfig, predictor)
+	director := requestcontrol.NewDirectorWithConfig(datastore, scheduler, saturationDetector, r.requestControlConfig)
 
 	// --- Setup ExtProc Server Runner ---
 	serverRunner := &runserver.ExtProcServerRunner{

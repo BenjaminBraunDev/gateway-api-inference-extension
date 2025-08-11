@@ -33,7 +33,6 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	errutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/error"
@@ -60,10 +59,7 @@ type Director interface {
 	HandleResponseHeaders(ctx context.Context, reqCtx *RequestContext) (*RequestContext, error)
 	HandleResponseBodyChunk(ctx context.Context, reqCtx *RequestContext) error
 	HandleResponseBodyComplete(ctx context.Context, reqCtx *RequestContext) error
-	HandleResponseTrailers(ctx context.Context, reqCtx *RequestContext) (*RequestContext, error)
 	GetRandomPod() *backend.Pod
-	IsPredictorAvailable() bool
-	GetDatastore() datastore.Datastore
 }
 
 type Datastore interface {
@@ -112,17 +108,17 @@ type RequestContext struct {
 	RequestState         StreamRequestState
 	ModelServerStreaming bool
 
-	TTFT                       float64
-	PredictedTTFT              float64
+	TTFT             float64
+	PredictedTTFT    float64
+	AvgTPOT          float64
+	AvgPredictedTPOT float64
+
 	PredictedTTFTForScheduling []float64
 	PredictedTPOTForScheduling []float64
 
-	PredictedTPOTObservations []float64
+	TokenSampler              *requtil.TokenSampler
 	TPOTObservations          []float64
-	AvgTPOT                   float64
-	AvgPredictedTPOT          float64
-
-	TokenSampler *requtil.TokenSampler
+	PredictedTPOTObservations []float64
 
 	Response *Response
 
@@ -290,9 +286,6 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 
 				responseText := string(v.ResponseBody.Body)
 				s.HandleResponseBodyModelStreaming(ctx, reqCtx, responseText)
-				if reqCtx.FirstTokenTimestamp.IsZero() {
-					reqCtx.FirstTokenTimestamp = time.Now()
-				}
 				if v.ResponseBody.EndOfStream {
 					loggerTrace.Info("stream completed")
 
@@ -356,16 +349,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				}
 			}
 		case *extProcPb.ProcessingRequest_ResponseTrailers:
-			logger.V(logutil.DEFAULT).Info("Processing response trailers", "trailers", v.ResponseTrailers.Trailers)
-			if reqCtx.ModelServerStreaming {
-
-				var trailerErr error
-				reqCtx, trailerErr = s.HandleResponseTrailers(ctx, reqCtx)
-				if trailerErr != nil {
-					logger.V(logutil.DEFAULT).Error(trailerErr, "Failed to process response trailers")
-				}
-				reqCtx.respTrailerResp = s.generateResponseTrailerResponse(reqCtx)
-			}
+			// This is currently unused.
 		}
 
 		// Handle the err and fire an immediate response.

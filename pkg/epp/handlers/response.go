@@ -73,19 +73,7 @@ func (s *StreamingServer) HandleResponseBodyModelStreaming(ctx context.Context, 
 		metrics.RecordOutputTokens(reqCtx.Model, reqCtx.ResolvedTargetModel, resp.Usage.CompletionTokens)
 		s.director.HandleResponseBodyComplete(ctx, reqCtx)
 	}
-	if s.director != nil && s.director.IsPredictorAvailable() {
-		s.director.HandleResponseBodyChunk(ctx, reqCtx)
-	}
 	s.director.HandleResponseBodyChunk(ctx, reqCtx)
-}
-
-// The function is to handle streaming response if the modelServer is streaming.
-func (s *StreamingServer) HandleResponseTrailers(
-	ctx context.Context,
-	reqCtx *RequestContext,
-) (*RequestContext, error) {
-
-	return s.director.HandleResponseTrailers(ctx, reqCtx)
 }
 
 func (s *StreamingServer) HandleResponseHeaders(ctx context.Context, reqCtx *RequestContext, resp *extProcPb.ProcessingRequest_ResponseHeaders) (*RequestContext, error) {
@@ -115,20 +103,6 @@ func (s *StreamingServer) generateResponseHeaderResponse(reqCtx *RequestContext)
 		},
 		ModeOverride: &filterPb.ProcessingMode{
 			ResponseTrailerMode: filterPb.ProcessingMode_SEND,
-		},
-	}
-}
-
-// generateResponseTrailerResponse generates a response for trailers.
-func (s *StreamingServer) generateResponseTrailerResponse(reqCtx *RequestContext) *extProcPb.ProcessingResponse {
-	return &extProcPb.ProcessingResponse{
-		Response: &extProcPb.ProcessingResponse_ResponseTrailers{
-			ResponseTrailers: &extProcPb.TrailersResponse{
-				HeaderMutation: &extProcPb.HeaderMutation{
-					// Correct field or remove if unnecessary
-					SetHeaders: s.generateResponseTrailers(reqCtx),
-				},
-			},
 		},
 	}
 }

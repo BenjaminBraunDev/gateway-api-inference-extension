@@ -35,7 +35,6 @@ import (
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
-	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/latencypredictorasync"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	errutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/error"
@@ -129,12 +128,12 @@ type SaturationDetector interface {
 	IsSaturated(ctx context.Context) bool
 }
 
-func NewDirectorWithConfig(datastore datastore.Datastore, scheduler Scheduler, saturationDetector SaturationDetector, config *Config, predictor latencypredictor.PredictorInterface) *Director {
+// NewDirectorWithConfig creates a new Director instance with all dependencies.
+func NewDirectorWithConfig(datastore datastore.Datastore, scheduler Scheduler, saturationDetector SaturationDetector, config *Config) *Director {
 	return &Director{
 		datastore:                   datastore,
 		scheduler:                   scheduler,
 		saturationDetector:          saturationDetector,
-		latencyPredictor:            predictor,
 		preRequestPlugins:           config.preRequestPlugins,
 		postResponsePlugins:         config.postResponsePlugins,
 		postResponseCompletePlugins: config.postResponseCompletePlugins,
@@ -146,9 +145,9 @@ type Director struct {
 	datastore                   datastore.Datastore
 	scheduler                   Scheduler
 	saturationDetector          SaturationDetector
-	latencyPredictor            latencypredictor.PredictorInterface
 	preRequestPlugins           []PreRequest
 	postResponsePlugins         []PostResponse
+	postResponseChunkPlugins    []PostResponseChunk
 	postResponseCompletePlugins []PostResponseComplete
 }
 
@@ -354,15 +353,7 @@ func (d *Director) HandleResponseHeaders(ctx context.Context, reqCtx *handlers.R
 		RequestId: reqCtx.Request.Headers[requtil.RequestIdHeaderKey],
 		Headers:   reqCtx.Response.Headers,
 	}
-	d.runPostResponsePlugins(ctx, reqCtx.SchedulingRequest, response, reqCtx.TargetPod)
-
-	if d.latencyPredictor == nil || reqCtx.SchedulingResult == nil {
-		logger.V(logutil.DEBUG).Info("Skipping header prediction; predictor or scheduling missing")
-		return reqCtx, nil
-	}
-	if err := ProcessHeaderForLatencyPrediction(ctx, d.latencyPredictor, reqCtx); err != nil {
-		logger.V(logutil.DEBUG).Error(err, "ProcessHeader in latencypredictor failed")
-	}
+	d.runPostResponsePlugins(ctx, reqCtx.SchedulingRequest, reqCtx, response, reqCtx.TargetPod)
 
 	logger.V(logutil.DEBUG).Info("Exiting HandleResponseHeaders")
 	return reqCtx, nil
@@ -372,18 +363,11 @@ func (d *Director) HandleResponseBodyChunk(ctx context.Context, reqCtx *handlers
 	logger := log.FromContext(ctx).WithValues("stage", "bodyChunk")
 	logger.V(logutil.TRACE).Info("Entering HandleResponseBodyChunk")
 
-	if d.latencyPredictor == nil || reqCtx.SchedulingResult == nil {
-		logger.V(logutil.TRACE).Info("Skipping body-chunk logic; predictor or scheduling missing")
-		return nil
+	response := &Response{
+		RequestId: reqCtx.Request.Headers[requtil.RequestIdHeaderKey],
+		Headers:   reqCtx.Response.Headers,
 	}
-
-	now := time.Now()
-
-	if reqCtx.TTFT == 0 {
-		ProcessFirstTokenForLatencyPrediction(ctx, d.latencyPredictor, reqCtx, now)
-	} else {
-		ProcessTokenForLatencyPrediction(ctx, d.latencyPredictor, reqCtx, now)
-	}
+	d.runPostResponseChunkPlugins(ctx, reqCtx.SchedulingRequest, reqCtx, response, reqCtx.TargetPod)
 
 	logger.V(logutil.TRACE).Info("Exiting HandleResponseBodyChunk")
 	return nil
@@ -395,10 +379,6 @@ func (d *Director) HandleResponseBodyComplete(ctx context.Context, reqCtx *handl
 	logger := log.FromContext(ctx).WithValues("stage", "bodyChunk")
 	logger.V(logutil.TRACE).Info("Entering HandleResponseBodyComplete")
 
-	if d.latencyPredictor == nil || reqCtx.SchedulingResult == nil {
-		logger.V(logutil.TRACE).Info("Skipping body-chunk logic; predictor or scheduling missing")
-		return nil
-	}
 	response := &Response{
 		RequestId: reqCtx.Request.Headers[requtil.RequestIdHeaderKey],
 		Headers:   reqCtx.Response.Headers,
@@ -447,11 +427,20 @@ func (d *Director) runPreRequestPlugins(ctx context.Context, request *scheduling
 	}
 }
 
-func (d *Director) runPostResponsePlugins(ctx context.Context, request *schedulingtypes.LLMRequest, response *Response, targetPod *backend.Pod) {
+func (d *Director) runPostResponsePlugins(ctx context.Context, request *schedulingtypes.LLMRequest, reqCtx *handlers.RequestContext, response *Response, targetPod *backend.Pod) {
 	for _, plugin := range d.postResponsePlugins {
 		log.FromContext(ctx).V(logutil.DEBUG).Info("Running post-response plugin", "plugin", plugin.TypedName().Type)
 		before := time.Now()
-		plugin.PostResponse(ctx, request, response, targetPod)
+		plugin.PostResponse(ctx, request, reqCtx, response, targetPod)
+		metrics.RecordRequestControlPluginProcessingLatency(PostResponsePluginType, plugin.TypedName().Type, time.Since(before))
+	}
+}
+
+func (d *Director) runPostResponseChunkPlugins(ctx context.Context, request *schedulingtypes.LLMRequest, reqCtx *handlers.RequestContext, response *Response, targetPod *backend.Pod) {
+	for _, plugin := range d.postResponseChunkPlugins {
+		log.FromContext(ctx).V(logutil.DEBUG).Info("Running post-response plugin", "plugin", plugin.TypedName().Type)
+		before := time.Now()
+		plugin.PostResponseChunk(ctx, request, reqCtx, response, targetPod)
 		metrics.RecordRequestControlPluginProcessingLatency(PostResponsePluginType, plugin.TypedName().Type, time.Since(before))
 	}
 }
@@ -463,14 +452,6 @@ func (d *Director) runPostResponseCompletePlugins(ctx context.Context, request *
 		plugin.PostResponseComplete(ctx, request, response, targetPod)
 		metrics.RecordRequestControlPluginProcessingLatency(PostResponsePluginType, plugin.TypedName().Type, time.Since(before))
 	}
-}
-
-func (d *Director) IsPredictorAvailable() bool {
-	return d.latencyPredictor != nil
-}
-
-func (d *Director) GetDatastore() datastore.Datastore {
-	return d.datastore
 }
 
 func (d *Director) GetRandomPod() *backend.Pod {
