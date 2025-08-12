@@ -136,6 +136,7 @@ func NewDirectorWithConfig(datastore datastore.Datastore, scheduler Scheduler, s
 		saturationDetector:          saturationDetector,
 		preRequestPlugins:           config.preRequestPlugins,
 		postResponsePlugins:         config.postResponsePlugins,
+		postResponseChunkPlugins:    config.postResponseChunkPlugins,
 		postResponseCompletePlugins: config.postResponseCompletePlugins,
 	}
 }
@@ -349,11 +350,7 @@ func (d *Director) HandleResponseHeaders(ctx context.Context, reqCtx *handlers.R
 	logger := log.FromContext(ctx).WithValues("stage", "headers")
 	logger.V(logutil.DEBUG).Info("Entering HandleResponseHeaders")
 
-	response := &Response{
-		RequestId: reqCtx.Request.Headers[requtil.RequestIdHeaderKey],
-		Headers:   reqCtx.Response.Headers,
-	}
-	d.runPostResponsePlugins(ctx, reqCtx.SchedulingRequest, reqCtx, response, reqCtx.TargetPod)
+	d.runPostResponsePlugins(ctx, reqCtx)
 
 	logger.V(logutil.DEBUG).Info("Exiting HandleResponseHeaders")
 	return reqCtx, nil
@@ -363,11 +360,7 @@ func (d *Director) HandleResponseBodyChunk(ctx context.Context, reqCtx *handlers
 	logger := log.FromContext(ctx).WithValues("stage", "bodyChunk")
 	logger.V(logutil.TRACE).Info("Entering HandleResponseBodyChunk")
 
-	response := &Response{
-		RequestId: reqCtx.Request.Headers[requtil.RequestIdHeaderKey],
-		Headers:   reqCtx.Response.Headers,
-	}
-	d.runPostResponseChunkPlugins(ctx, reqCtx.SchedulingRequest, reqCtx, response, reqCtx.TargetPod)
+	d.runPostResponseChunkPlugins(ctx, reqCtx)
 
 	logger.V(logutil.TRACE).Info("Exiting HandleResponseBodyChunk")
 	return nil
@@ -377,15 +370,11 @@ func (d *Director) HandleResponseBodyChunk(ctx context.Context, reqCtx *handlers
 // It runs the PostResponseComplete plugins.
 func (d *Director) HandleResponseBodyComplete(ctx context.Context, reqCtx *handlers.RequestContext) error {
 	logger := log.FromContext(ctx).WithValues("stage", "bodyChunk")
-	logger.V(logutil.TRACE).Info("Entering HandleResponseBodyComplete")
+	logger.V(logutil.DEBUG).Info("Entering HandleResponseBodyComplete")
 
-	response := &Response{
-		RequestId: reqCtx.Request.Headers[requtil.RequestIdHeaderKey],
-		Headers:   reqCtx.Response.Headers,
-	}
-	d.runPostResponseCompletePlugins(ctx, reqCtx.SchedulingRequest, response, reqCtx.TargetPod)
+	d.runPostResponseCompletePlugins(ctx, reqCtx)
 
-	logger.V(logutil.TRACE).Info("Exiting HandleResponseBodyComplete")
+	logger.V(logutil.DEBUG).Info("Exiting HandleResponseBodyComplete")
 	return nil
 }
 
@@ -427,29 +416,29 @@ func (d *Director) runPreRequestPlugins(ctx context.Context, request *scheduling
 	}
 }
 
-func (d *Director) runPostResponsePlugins(ctx context.Context, request *schedulingtypes.LLMRequest, reqCtx *handlers.RequestContext, response *Response, targetPod *backend.Pod) {
+func (d *Director) runPostResponsePlugins(ctx context.Context, reqCtx *handlers.RequestContext) {
 	for _, plugin := range d.postResponsePlugins {
 		log.FromContext(ctx).V(logutil.DEBUG).Info("Running post-response plugin", "plugin", plugin.TypedName().Type)
 		before := time.Now()
-		plugin.PostResponse(ctx, request, reqCtx, response, targetPod)
+		plugin.PostResponse(ctx, reqCtx)
 		metrics.RecordRequestControlPluginProcessingLatency(PostResponsePluginType, plugin.TypedName().Type, time.Since(before))
 	}
 }
 
-func (d *Director) runPostResponseChunkPlugins(ctx context.Context, request *schedulingtypes.LLMRequest, reqCtx *handlers.RequestContext, response *Response, targetPod *backend.Pod) {
+func (d *Director) runPostResponseChunkPlugins(ctx context.Context, reqCtx *handlers.RequestContext) {
 	for _, plugin := range d.postResponseChunkPlugins {
-		log.FromContext(ctx).V(logutil.DEBUG).Info("Running post-response plugin", "plugin", plugin.TypedName().Type)
+		log.FromContext(ctx).V(logutil.TRACE).Info("Running post-response chunk plugin", "plugin", plugin.TypedName().Type)
 		before := time.Now()
-		plugin.PostResponseChunk(ctx, request, reqCtx, response, targetPod)
+		plugin.PostResponseChunk(ctx, reqCtx)
 		metrics.RecordRequestControlPluginProcessingLatency(PostResponsePluginType, plugin.TypedName().Type, time.Since(before))
 	}
 }
 
-func (d *Director) runPostResponseCompletePlugins(ctx context.Context, request *schedulingtypes.LLMRequest, response *Response, targetPod *backend.Pod) {
+func (d *Director) runPostResponseCompletePlugins(ctx context.Context, reqCtx *handlers.RequestContext) {
 	for _, plugin := range d.postResponseCompletePlugins {
-		log.FromContext(ctx).V(logutil.DEBUG).Info("Running post-response plugin", "plugin", plugin.TypedName().Type)
+		log.FromContext(ctx).V(logutil.DEBUG).Info("Running post-response complete plugin", "plugin", plugin.TypedName().Type)
 		before := time.Now()
-		plugin.PostResponseComplete(ctx, request, response, targetPod)
+		plugin.PostResponseComplete(ctx, reqCtx)
 		metrics.RecordRequestControlPluginProcessingLatency(PostResponsePluginType, plugin.TypedName().Type, time.Since(before))
 	}
 }

@@ -18,16 +18,17 @@ package slorequest
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/latencypredictorasync"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	scheduling_types "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -94,8 +95,11 @@ func (t *SLORequestTracker) PreRequest(ctx context.Context, request *scheduling_
 	}
 }
 
-func (t *SLORequestTracker) PostResponse(ctx context.Context, request *scheduling_types.LLMRequest, reqCtx *handlers.RequestContext, response *requestcontrol.Response, targetPod *backend.Pod) {
+func (t *SLORequestTracker) PostResponse(ctx context.Context, reqCtx *handlers.RequestContext) {
 	logger := log.FromContext(ctx)
+	request := reqCtx.SchedulingRequest
+	targetPod := reqCtx.TargetPod
+
 	if request.TTFTSLO == 0 || request.AvgTPOTSLO == 0 {
 		logger.V(logutil.DEBUG).Info("SLORequestTracker: Skipping PostResponse because no SLOs were provided.")
 		return
@@ -116,8 +120,11 @@ func (t *SLORequestTracker) PostResponse(ctx context.Context, request *schedulin
 
 }
 
-func (t *SLORequestTracker) PostResponseChunk(ctx context.Context, request *scheduling_types.LLMRequest, reqCtx *handlers.RequestContext, response *requestcontrol.Response, targetPod *backend.Pod) {
+func (t *SLORequestTracker) PostResponseChunk(ctx context.Context, reqCtx *handlers.RequestContext) {
 	logger := log.FromContext(ctx)
+	request := reqCtx.SchedulingRequest
+	targetPod := reqCtx.TargetPod
+
 	if request.TTFTSLO == 0 || request.AvgTPOTSLO == 0 {
 		logger.V(logutil.DEBUG).Info("SLORequestTracker: Skipping PostResponse because no SLOs were provided.")
 		return
@@ -143,9 +150,10 @@ func (t *SLORequestTracker) PostResponseChunk(ctx context.Context, request *sche
 
 }
 
-func (t *SLORequestTracker) PostResponseComplete(ctx context.Context, request *scheduling_types.LLMRequest, response *requestcontrol.Response, targetPod *backend.Pod) {
+func (t *SLORequestTracker) PostResponseComplete(ctx context.Context, reqCtx *handlers.RequestContext) {
 	logger := log.FromContext(ctx)
-
+	request := reqCtx.SchedulingRequest
+	targetPod := reqCtx.TargetPod
 	if request.TTFTSLO == 0 || request.AvgTPOTSLO == 0 {
 		logger.V(logutil.DEBUG).Info("SLORequestTracker: Skipping PostResponse because no SLOs were provided.")
 		return
@@ -158,6 +166,26 @@ func (t *SLORequestTracker) PostResponseComplete(ctx context.Context, request *s
 	if t.latencypredictor == nil {
 		logger.V(logutil.DEBUG).Info("Skipping header prediction; predictor or scheduling missing")
 		return
+	}
+
+	mapeTTFT := 0.0
+	if reqCtx.TTFT > 0 {
+		mapeTTFT = math.Abs((reqCtx.TTFT-reqCtx.PredictedTTFT)/reqCtx.TTFT) * 100
+		logger.V(logutil.DEBUG).Info("Averages calculated", "avgActualTTFT", reqCtx.TTFT, "avgPredictedTTFT", reqCtx.PredictedTTFT)
+		logger.V(logutil.DEBUG).Info("MAPE TTFT computed", "mapeTTFT%", mapeTTFT)
+		metrics.RecordRequestTTFT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.TTFT/1000)
+		metrics.RecordRequestPredictedTTFT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.PredictedTTFT/1000)
+		metrics.RecordRequestTTFTPredictionMape(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, mapeTTFT)
+	}
+
+	mapeTPOT := 0.0
+	if reqCtx.AvgTPOT > 0 {
+		mapeTPOT = math.Abs((reqCtx.AvgTPOT-reqCtx.AvgPredictedTPOT)/reqCtx.AvgTPOT) * 100
+		logger.V(logutil.DEBUG).Info("Averages calculated", "avgActualTPOT", reqCtx.AvgTPOT, "avgPredictedTPOT", reqCtx.AvgPredictedTPOT)
+		logger.V(logutil.DEBUG).Info("MAPE TPOT computed", "mapeTPOT%", mapeTPOT)
+		metrics.RecordRequestTPOT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.AvgTPOT/1000)
+		metrics.RecordRequestPredictedTPOT(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, reqCtx.AvgPredictedTPOT/1000)
+		metrics.RecordRequestTPOTPredictionMape(ctx, reqCtx.Model, reqCtx.ResolvedTargetModel, mapeTPOT)
 	}
 
 	podName := types.NamespacedName{

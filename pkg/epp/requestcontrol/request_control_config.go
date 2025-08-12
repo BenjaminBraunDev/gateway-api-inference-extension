@@ -25,6 +25,7 @@ func NewConfig() *Config {
 	return &Config{
 		preRequestPlugins:           []PreRequest{},
 		postResponsePlugins:         []PostResponse{},
+		postResponseChunkPlugins:    []PostResponseChunk{},
 		postResponseCompletePlugins: []PostResponseComplete{},
 	}
 }
@@ -33,6 +34,7 @@ func NewConfig() *Config {
 type Config struct {
 	preRequestPlugins           []PreRequest
 	postResponsePlugins         []PostResponse
+	postResponseChunkPlugins    []PostResponseChunk
 	postResponseCompletePlugins []PostResponseComplete
 }
 
@@ -50,6 +52,13 @@ func (c *Config) WithPostResponsePlugins(plugins ...PostResponse) *Config {
 	return c
 }
 
+// WithPostResponsePlugins sets the given plugins as the PostResponse plugins.
+// If the Config has PostResponse plugins already, this call replaces the existing plugins with the given ones.
+func (c *Config) WithPostResponseChunkPlugins(plugins ...PostResponseChunk) *Config {
+	c.postResponseChunkPlugins = plugins
+	return c
+}
+
 // WithPostResponseCompletePlugins sets the given plugins as the PostResponseComplete plugins.
 // If the Config has PostResponseComplete plugins already, this call replaces the existing plugins with the given ones.
 func (c *Config) WithPostResponseCompletePlugins(plugins ...PostResponseComplete) *Config {
@@ -64,6 +73,9 @@ func (c *Config) AddPlugins(pluginObjects ...plugins.Plugin) {
 		}
 		if postResponsePlugin, ok := plugin.(PostResponse); ok {
 			c.postResponsePlugins = append(c.postResponsePlugins, postResponsePlugin)
+		}
+		if postResponseChunkPlugin, ok := plugin.(PostResponseChunk); ok {
+			c.postResponseChunkPlugins = append(c.postResponseChunkPlugins, postResponseChunkPlugin)
 		}
 		if postResponseCompletePlugin, ok := plugin.(PostResponseComplete); ok {
 			c.postResponseCompletePlugins = append(c.postResponseCompletePlugins, postResponseCompletePlugin)
