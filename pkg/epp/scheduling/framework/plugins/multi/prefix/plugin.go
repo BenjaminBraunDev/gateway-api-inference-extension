@@ -80,6 +80,11 @@ type Plugin struct {
 	indexer     Indexer
 }
 
+// Dependencies implements framework.Scorer.
+func (p *Plugin) Dependencies() []plugins.TypedName {
+	return []plugins.TypedName{} // No dependencies
+}
+
 // podSet holds an pods servers that may have a specific prefix hash.
 type podSet map[ServerID]struct{}
 
