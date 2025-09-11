@@ -246,7 +246,7 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 		TTFTSLO:                  ttftSLO,
 		AvgTPOTSLO:               avgTPOTSLO,
 		PredictorBasedScheduling: predictionBasedScheduling,
-		HasValidPod:              true, // will be set to true if there is at least one pod with predictions
+		HasValidPod:              true, // will be set to false if there is no valid pod based on predictions
 	}
 
 	logger = logger.WithValues("objectiveKey", reqCtx.ObjectiveKey, "incomingModelName", reqCtx.IncomingModelName, "targetModelName", reqCtx.TargetModelName, "priority", infObjective.Spec.Priority)
