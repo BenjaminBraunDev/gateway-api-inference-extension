@@ -58,7 +58,7 @@ var (
 
 	requestTTFT = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Subsystem: InferenceModelComponent,
+			Subsystem: InferenceObjectiveComponent,
 			Name:      "request_ttft_seconds",
 			Help:      metricsutil.HelpMsgWithStability("Inference model TTFT distribution in seconds for each model and target model.", compbasemetrics.ALPHA),
 			Buckets: []float64{
@@ -71,7 +71,7 @@ var (
 
 	requestTTFTGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Subsystem: InferenceModelComponent,
+			Subsystem: InferenceObjectiveComponent,
 			Name:      "request_ttft_seconds_gauge",
 			Help:      metricsutil.HelpMsgWithStability("Inference model TTFT gauge in seconds for each model and target model.", compbasemetrics.ALPHA),
 		},
@@ -80,7 +80,7 @@ var (
 
 	requestPredictedTTFT = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Subsystem: InferenceModelComponent,
+			Subsystem: InferenceObjectiveComponent,
 			Name:      "request_predicted_ttft_seconds",
 			Help:      metricsutil.HelpMsgWithStability("Inference model Predicted TTFT distribution in seconds for each model and target model.", compbasemetrics.ALPHA),
 			Buckets: []float64{
@@ -93,7 +93,7 @@ var (
 
 	requestPredictedTTFTGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Subsystem: InferenceModelComponent,
+			Subsystem: InferenceObjectiveComponent,
 			Name:      "request_predicted_ttft_seconds_gauge",
 			Help:      metricsutil.HelpMsgWithStability("Inference model Predicted TTFT gauge in seconds for each model and target model.", compbasemetrics.ALPHA),
 		},
@@ -103,7 +103,7 @@ var (
 	// New metrics for TTFT prediction duration
 	requestTTFTPredictionDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Subsystem: InferenceModelComponent,
+			Subsystem: InferenceObjectiveComponent,
 			Name:      "request_ttft_prediction_duration_seconds",
 			Help:      metricsutil.HelpMsgWithStability("Duration taken to generate TTFT predictions in seconds for each model and target model.", compbasemetrics.ALPHA),
 			Buckets: []float64{
@@ -115,7 +115,7 @@ var (
 
 	requestTTFTPredictionDurationGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Subsystem: InferenceModelComponent,
+			Subsystem: InferenceObjectiveComponent,
 			Name:      "request_ttft_prediction_duration_seconds_gauge",
 			Help:      metricsutil.HelpMsgWithStability("Latest duration taken to generate TTFT predictions in seconds for each model and target model.", compbasemetrics.ALPHA),
 		},
@@ -124,7 +124,7 @@ var (
 
 	requestTPOT = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Subsystem: InferenceModelComponent,
+			Subsystem: InferenceObjectiveComponent,
 			Name:      "request_tpot_seconds",
 			Help:      metricsutil.HelpMsgWithStability("Inference model TPOT distribution in seconds for each model and target model.", compbasemetrics.ALPHA),
 			Buckets: []float64{
@@ -137,7 +137,7 @@ var (
 
 	requestTPOTGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Subsystem: InferenceModelComponent,
+			Subsystem: InferenceObjectiveComponent,
 			Name:      "request_tpot_seconds_gauge",
 			Help:      metricsutil.HelpMsgWithStability("Inference model TPOT gauge in seconds for each model and target model.", compbasemetrics.ALPHA),
 		},
@@ -145,7 +145,7 @@ var (
 	)
 	requestPredictedTPOT = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Subsystem: InferenceModelComponent,
+			Subsystem: InferenceObjectiveComponent,
 			Name:      "request_predicted_tpot_seconds",
 			Help:      metricsutil.HelpMsgWithStability("Inference model Predicted TPOT distribution in seconds for each model and target model.", compbasemetrics.ALPHA),
 			Buckets: []float64{
@@ -158,7 +158,7 @@ var (
 
 	requestPredictedTPOTGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Subsystem: InferenceModelComponent,
+			Subsystem: InferenceObjectiveComponent,
 			Name:      "request_predicted_tpot_seconds_gauge",
 			Help:      metricsutil.HelpMsgWithStability("Inference model Predicted TPOT gauge in seconds for each model and target model.", compbasemetrics.ALPHA),
 		},
@@ -168,7 +168,7 @@ var (
 	// New metrics for TPOT prediction duration
 	requestTPOTPredictionDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Subsystem: InferenceModelComponent,
+			Subsystem: InferenceObjectiveComponent,
 			Name:      "request_tpot_prediction_duration_seconds",
 			Help:      metricsutil.HelpMsgWithStability("Duration taken to generate TPOT predictions in seconds for each model and target model.", compbasemetrics.ALPHA),
 			Buckets: []float64{
@@ -180,7 +180,7 @@ var (
 
 	requestTPOTPredictionDurationGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Subsystem: InferenceModelComponent,
+			Subsystem: InferenceObjectiveComponent,
 			Name:      "request_tpot_prediction_duration_seconds_gauge",
 			Help:      metricsutil.HelpMsgWithStability("Latest duration taken to generate TPOT predictions in seconds for each model and target model.", compbasemetrics.ALPHA),
 		},
@@ -189,7 +189,7 @@ var (
 
 	requestTPOTPredictionMAPE = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Subsystem: InferenceModelComponent,
+			Subsystem: InferenceObjectiveComponent,
 			Name:      "request_tpot_predictions_mape",
 			Help:      metricsutil.HelpMsgWithStability("Inference model TPOT prediction mape distribution in seconds for each model and target model.", compbasemetrics.ALPHA),
 			Buckets: []float64{
@@ -202,7 +202,7 @@ var (
 
 	requestTPOTPredictionMAPEGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Subsystem: InferenceModelComponent,
+			Subsystem: InferenceObjectiveComponent,
 			Name:      "request_tpot_predictions_mape_gauge",
 			Help:      metricsutil.HelpMsgWithStability("Inference model TPOT prediction mape gauge in seconds for each model and target model.", compbasemetrics.ALPHA),
 		},
@@ -211,7 +211,7 @@ var (
 
 	requestTTFTPredictionMAPE = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Subsystem: InferenceModelComponent,
+			Subsystem: InferenceObjectiveComponent,
 			Name:      "request_ttft_predictions_mape",
 			Help:      metricsutil.HelpMsgWithStability("Inference model TTFT prediction mape distribution in seconds for each model and target model.", compbasemetrics.ALPHA),
 			Buckets: []float64{
@@ -224,7 +224,7 @@ var (
 
 	requestTTFTPredictionMAPEGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Subsystem: InferenceModelComponent,
+			Subsystem: InferenceObjectiveComponent,
 			Name:      "request_ttft_predictions_mape_gauge",
 			Help:      metricsutil.HelpMsgWithStability("Inference model TTFT prediction mape gauge in seconds for each model and target model.", compbasemetrics.ALPHA),
 		},
