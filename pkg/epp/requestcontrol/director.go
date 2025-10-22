@@ -183,12 +183,7 @@ type Director struct {
 	defaultPriority int
 }
 
-// HandleRequest orchestrates the request lifecycle:
-//  1. Parses request details.
-//  2. Calls admitRequest for admission control.
-//  3. Calls Scheduler.Schedule if request is approved.
-//  4. Calls prepareRequest to populate RequestContext with result and call PreRequest plugins.
-//
+// HandleRequest orchestrates the request lifecycle.
 // It always returns the requestContext even in the error case, as the request context is used in error handling.
 func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestContext) (*handlers.RequestContext, error) {
 	logger := log.FromContext(ctx)
@@ -215,13 +210,9 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	infObjective := d.datastore.ObjectiveGet(reqCtx.ObjectiveKey)
 	if infObjective == nil {
 		logger.V(logutil.VERBOSE).Info("No associated InferenceObjective found, using default", "objectiveKey", reqCtx.ObjectiveKey)
-		priority := d.defaultPriority
-		if strings.Contains(reqCtx.ObjectiveKey, "sheddable") {
-			priority = -1
-		}
 		infObjective = &v1alpha2.InferenceObjective{
 			Spec: v1alpha2.InferenceObjectiveSpec{
-				Priority: &priority,
+				Priority: &d.defaultPriority,
 			},
 		}
 	} else if infObjective.Spec.Priority == nil {
@@ -278,12 +269,7 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 		return reqCtx, errutil.Error{Code: errutil.InferencePoolResourceExhausted, Msg: fmt.Errorf("failed to find target pod: %w", err).Error()}
 	}
 
-	// Admission Control check
-	if err := d.admitRequest(ctx, candidatePods, reqCtx.SchedulingRequest, *infObjective.Spec.Priority, reqCtx.FairnessID); err != nil {
-		return reqCtx, err
-	}
-
-	// --- 4. Prepare Request (Populates RequestContext and call PreRequest plugins) ---
+	// Prepare Request (Populates RequestContext and call PreRequest plugins)
 	// Insert target endpoint to instruct Envoy to route requests to the specified target pod and attach the port number.
 	// Invoke PreRequest registered plugins.
 	reqCtx, err = d.prepareRequest(ctx, reqCtx, result)
@@ -292,33 +278,6 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	}
 
 	return reqCtx, nil
-}
-
-// admitRequest handles admission control to decide whether or not to accept the request
-// based on the request priority and system saturation state.
-func (d *Director) admitRequest(ctx context.Context, candidatePods []backendmetrics.PodMetrics, request *schedulingtypes.LLMRequest, requestPriority int, fairnessID string) error {
-	logger := log.FromContext(ctx)
-
-	logger.V(logutil.DEBUG).Info("Entering Flow Control", "priority", requestPriority, "fairnessID", fairnessID)
-
-	// This will be removed in favor of a more robust implementation (Flow Control) in the very near future.
-	// TODO: Make this a configurable value.
-	// Tracking issue https://github.com/kubernetes-sigs/gateway-api-inference-extension/issues/1347
-	if requestPriority >= 0 {
-		logger.V(logutil.DEBUG).Info("Non-sheddable request bypassing saturation check.")
-		return nil
-	} else {
-		logger.V(logutil.DEBUG).Info("Sheddable request subject to saturation check.")
-	}
-
-	if d.saturationDetector.IsSaturated(ctx, candidatePods) || !request.HasValidPod { // Assuming non-nil Saturation Detector
-		return errutil.Error{
-			Code: errutil.InferencePoolResourceExhausted,
-			Msg:  "system saturated, sheddable request dropped",
-		}
-	}
-
-	return nil
 }
 
 // getCandidatePodsForScheduling gets the list of relevant endpoints for the scheduling cycle from the datastore.
