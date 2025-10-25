@@ -371,7 +371,6 @@ func TestDirector_HandleRequest(t *testing.T) {
 				},
 			},
 			mockAdmissionController: &mockAdmissionController{admitErr: nil},
-			mockAdmissionController: &mockAdmissionController{admitErr: nil},
 			schedulerMockSetup: func(m *mockScheduler) {
 				m.scheduleResults = defaultSuccessfulScheduleResults
 			},
@@ -394,7 +393,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 				"model":  model, // Critical model
 				"prompt": "test prompt",
 			},
-			mockSaturationDetector: &mockSaturationDetector{isSaturated: true},
+			mockAdmissionController: &mockAdmissionController{admitErr: nil},
 			schedulerMockSetup: func(m *mockScheduler) {
 				m.scheduleResults = defaultSuccessfulScheduleResults
 			},
@@ -410,9 +409,10 @@ func TestDirector_HandleRequest(t *testing.T) {
 			wantReqCtx: &handlers.RequestContext{
 				TargetModelName: model,
 				TargetPod: &backend.Pod{
-					NamespacedName:  types.NamespacedName{Namespace: "default", Name: "pod1"},
-					Address:         "192.168.1.100",
-					RunningRequests: &datalayer.RequestPriorityQueue{}, // Empty but initialized
+					NamespacedName: types.NamespacedName{Namespace: "default", Name: "pod1"},
+					Address:        "192.168.1.100",
+					Port:           "8000",
+					MetricsHost:    "192.168.1.100:8000",
 				},
 				TargetEndpoint: "192.168.1.100:8000,192.168.2.100:8000,192.168.4.100:8000",
 			},
