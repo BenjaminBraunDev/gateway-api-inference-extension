@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -56,6 +57,14 @@ func (s *LoraAffinityScorer) Dependencies() []plugins.TypedName {
 // TypedName returns the type and name tuple of this plugin instance.
 func (s *LoraAffinityScorer) TypedName() plugins.TypedName {
 	return s.tn
+}
+
+// Consumes returns the list of data that is consumed by the plugin.
+func (s *LoraAffinityScorer) Consumes() map[string]any {
+	return map[string]any{
+		metrics.ActiveModelsKey:  map[string]int{},
+		metrics.WaitingModelsKey: map[string]int{},
+	}
 }
 
 // WithName sets the name of the scorer.
