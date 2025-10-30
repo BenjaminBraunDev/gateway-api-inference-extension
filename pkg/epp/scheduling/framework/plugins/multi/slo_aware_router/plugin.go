@@ -219,6 +219,12 @@ type SLOAwareRouter struct {
 	headroomStrategy    HeadroomStrategy
 }
 
+func (s *SLOAwareRouter) Dependencies() []plugins.TypedName {
+	return []plugins.TypedName{
+		{Type: "prefix-cache-scorer", Name: "prefix-cache-scorer"},
+	}
+}
+
 var _ framework.Scorer = &SLOAwareRouter{}
 
 func NewSLOAwareRouter(latencypredictor latencypredictor.PredictorInterface, strategy HeadroomStrategy) *SLOAwareRouter {
