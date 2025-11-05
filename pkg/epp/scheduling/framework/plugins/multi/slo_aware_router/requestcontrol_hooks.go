@@ -61,27 +61,30 @@ type SLORequestContext struct {
 
 func NewSLORequestContext(request *schedulingtypes.LLMRequest) *SLORequestContext {
 	return &SLORequestContext{
-		SchedulingRequest: *request,
-		LastSeenMetrics:   make(map[string]*backendmetrics.MetricsState),
+		SchedulingRequest:          *request,
+		LastSeenMetrics:            make(map[string]*backendmetrics.MetricsState),
+		PrefixCacheScoresForPods:   make(map[string]float64),
+		PredictedTTFTForScheduling: make(map[string]float64),
+		PredictedTPOTForScheduling: make(map[string]float64),
 	}
 }
 
 func (s *SLOAwareRouter) getSLOContextForRequest(request *schedulingtypes.LLMRequest) (*SLORequestContext, error) {
 	id := request.Headers[requtil.RequestIdHeaderKey]
-	if ctx, exists := s.sloContextStore[id]; exists {
-		return ctx, nil
+	if ctx, exists := s.sloContextStore.Load(id); exists {
+		return ctx.(*SLORequestContext), nil
 	}
 	return nil, fmt.Errorf("SLO context not found for request ID: %s", id)
 }
 
 func (s *SLOAwareRouter) setSLOContextForRequest(request *schedulingtypes.LLMRequest, ctx *SLORequestContext) {
 	id := request.Headers[requtil.RequestIdHeaderKey]
-	s.sloContextStore[id] = ctx
+	s.sloContextStore.Store(id, ctx)
 }
 
 func (s *SLOAwareRouter) deleteSLOContextForRequest(request *schedulingtypes.LLMRequest) {
 	id := request.Headers[requtil.RequestIdHeaderKey]
-	delete(s.sloContextStore, id)
+	s.sloContextStore.Delete(id)
 }
 
 // --- RequestControl Hooks ---
@@ -130,6 +133,7 @@ func (t *SLOAwareRouter) PreRequest(ctx context.Context, request *schedulingtype
 	// Set up SLO request context
 	sloCtx.TargetPod = targetPod
 	sloCtx.SchedulingResult = schedulingResult
+	sloCtx.RequestReceivedTimestamp = time.Now()
 	RefreshLastSeenMetrics(ctx, sloCtx)
 	t.setSLOContextForRequest(request, sloCtx)
 }
