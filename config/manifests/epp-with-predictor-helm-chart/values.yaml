@@ -1,0 +1,77 @@
+# Helm values for configurable EPP deployment
+
+# Number of prediction server sidecars (1-20 recommended)
+predictionServers:
+  count: 10
+  image: us-docker.pkg.dev/kaushikmitra-gke-dev/kaushikmitra-docker-repo/latencypredictor-v3-prediction-server:latest
+  imagePullPolicy: Always
+  basePort: 8001  # First prediction server will use this port, subsequent ones increment
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+  storage:
+    sizeLimit: "10Gi"
+  livenessProbe:
+    initialDelaySeconds: 15
+    periodSeconds: 15
+  readinessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    failureThreshold: 10
+
+# Training server configuration
+trainingServer:
+  image: us-docker.pkg.dev/kaushikmitra-gke-dev/kaushikmitra-docker-repo/latencypredictor-v3-training-server:latest
+  imagePullPolicy: Always
+  port: 8000
+  resources:
+    requests:
+      cpu: "2000m"
+      memory: "4Gi"
+    limits:
+      cpu: "4000m"
+      memory: "8Gi"
+  storage:
+    sizeLimit: "20Gi"
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 20
+  readinessProbe:
+    initialDelaySeconds: 45
+    periodSeconds: 10
+
+# EPP container configuration
+epp:
+  image: us-docker.pkg.dev/kaushikmitra-gke-dev/kaushikmitra-docker-repo/epp-wlp-latencypredictor-v2
+  imagePullPolicy: Always
+  grpcPort: 9002
+  grpcHealthPort: 9003
+  metricsPort: 9090
+  verbosity: 4
+
+# InferencePool configuration
+inferencePool:
+  name: vllm-llama3-8b-instruct
+  namespace: default
+  targetPortNumber: 8000
+
+# Latency predictor configuration
+latencyPredictor:
+  config:
+    retrainingIntervalSec: "1"
+    minSamplesForRetrain: "100"
+    modelType: "xgboost"
+    maxTrainingDataSizePerBucket: "5000"
+    quantileAlpha: "0.9"
+  maxSampleSize: "10000"
+
+# Deployment configuration
+deployment:
+  replicas: 1
+
+
+

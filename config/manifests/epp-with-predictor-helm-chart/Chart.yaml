@@ -1,0 +1,13 @@
+apiVersion: v2
+name: epp-latency-predictor
+description: A Helm chart for EPP deployment with configurable prediction servers
+type: application
+version: 1.0.0
+appVersion: "1.0"
+keywords:
+  - kubernetes
+  - gateway-api
+  - inference
+  - latency-prediction
+maintainers:
+  - name: kaushikmitra
