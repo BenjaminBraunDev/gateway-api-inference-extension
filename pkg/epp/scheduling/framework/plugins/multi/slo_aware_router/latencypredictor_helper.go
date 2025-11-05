@@ -28,12 +28,6 @@ import (
 	requtil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
 )
 
-const (
-	// Poisson sampling parameters for predictions
-	defaultSamplingMean = 100 // Mean interval between prediction samples (tokens)
-	maxSampledTokens    = 20  // Maximum number of prediction samples per request
-)
-
 // RefreshLastSeenMetrics updates sloCtx.LastSeenMetrics from the latest scheduling result.
 func RefreshLastSeenMetrics(ctx context.Context, sloCtx *SLORequestContext) {
 	if sr := sloCtx.SchedulingResult; sr != nil {
@@ -136,7 +130,7 @@ func ProcessFirstTokenForLatencyPrediction(
 	// Initialize sampler
 	if sloCtx.TokenSampler == nil {
 		requestID := sloCtx.SchedulingRequest.Headers[requtil.RequestIdHeaderKey]
-		sloCtx.TokenSampler = NewTokenSampler(requestID, defaultSamplingMean, maxSampledTokens)
+		sloCtx.TokenSampler = NewTokenSampler(requestID, DefaultSamplingMean, MaxSampledTokens)
 		logger.V(logutil.DEBUG).Info("Initialized token sampler for first token", "request_id", requestID, "next_prediction_token", sloCtx.TokenSampler.GetNextSampleToken())
 	}
 
@@ -214,7 +208,7 @@ func ProcessTokenForLatencyPrediction(
 	// Initialize sampler if not yet
 	if sloCtx.TokenSampler == nil {
 		requestID := sloCtx.SchedulingRequest.Headers[requtil.RequestIdHeaderKey]
-		sloCtx.TokenSampler = NewTokenSampler(requestID, defaultSamplingMean, maxSampledTokens)
+		sloCtx.TokenSampler = NewTokenSampler(requestID, DefaultSamplingMean, MaxSampledTokens)
 		logger.V(logutil.DEBUG).Info("Initialized token sampler for subsequent tokens", "request_id", requestID, "next_prediction_token", sloCtx.TokenSampler.GetNextSampleToken())
 	}
 

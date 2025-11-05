@@ -35,19 +35,6 @@ import (
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
-type PodPredictionResult struct {
-	Pod              schedulingtypes.Pod
-	TTFT             float64
-	TPOT             float64
-	TTFTValid        bool
-	TPOTValid        bool
-	IsValid          bool
-	Error            error
-	Headroom         float64 // Headroom for the pod, if applicable
-	TTFTHeadroom     float64 // TTFT headroom for the pod
-	PrefixCacheScore float64 // Prefix cache score for the pod
-}
-
 type SLOAwareRouter struct {
 	tn                  plugins.TypedName
 	latencypredictor    latencypredictor.PredictorInterface
@@ -126,6 +113,48 @@ func (s *SLOAwareRouter) epsilonGreedyAffinityGate(
 	return eligible, true
 }
 
+// scoreWithoutPredictions provides fallback scoring based only on prefix cache scores
+// when latency predictions are unavailable
+func (s *SLOAwareRouter) scoreWithoutPredictions(
+	ctx context.Context,
+	state *schedulingtypes.CycleState,
+	pods []schedulingtypes.Pod,
+	r *rand.Rand,
+) map[schedulingtypes.Pod]float64 {
+	logger := log.FromContext(ctx)
+	logger.V(logutil.TRACE).Info("Using composite-only scoring without predictions")
+
+	scores := make(map[schedulingtypes.Pod]float64, len(pods))
+	for _, pod := range pods {
+		scores[pod] = 0
+	}
+
+	if len(pods) == 0 {
+		return scores
+	}
+
+	// Build prediction results with only prefix cache scores
+	podResults := make([]PodPredictionResult, 0, len(pods))
+	for _, pod := range pods {
+		prefixScore := s.getPrefixCacheScoreForPod(ctx, state, pod)
+		podResults = append(podResults, PodPredictionResult{
+			Pod:              pod,
+			PrefixCacheScore: prefixScore,
+			IsValid:          true, // All pods are valid when we don't check predictions
+		})
+	}
+
+	// Select based on composite scores (prefix cache + other non-prediction metrics)
+	selectedPod := s.selectFromCompositeScores(ctx, podResults, r, HeadroomStrategyCompositeOnly)
+
+	if selectedPod != nil {
+		scores[selectedPod] = 1
+		logger.V(logutil.TRACE).Info("Selected pod using composite-only scoring", "pod", selectedPod.GetPod().String())
+	}
+
+	return scores
+}
+
 func (s *SLOAwareRouter) Score(ctx context.Context, state *schedulingtypes.CycleState, request *schedulingtypes.LLMRequest, pods []schedulingtypes.Pod) map[schedulingtypes.Pod]float64 {
 	logger := log.FromContext(ctx)
 	if s.latencypredictor == nil {
@@ -158,11 +187,6 @@ func (s *SLOAwareRouter) Score(ctx context.Context, state *schedulingtypes.Cycle
 		return nil
 	}
 
-	predictions := s.generatePredictions(ctx, state, request, sloCtx, pods)
-	s.updateRequestContextWithPredictions(sloCtx, predictions)
-
-	allPreds := append([]PodPredictionResult(nil), predictions...)
-
 	// Initialize scores map with all pods having score 0
 	scores := make(map[schedulingtypes.Pod]float64, len(pods))
 	for _, pod := range pods {
@@ -171,6 +195,17 @@ func (s *SLOAwareRouter) Score(ctx context.Context, state *schedulingtypes.Cycle
 
 	source := rand.NewSource(time.Now().UnixNano())
 	r := rand.New(source)
+
+	predictions, err := s.generatePredictions(ctx, state, request, sloCtx, pods)
+	if err != nil {
+		logger.V(logutil.DEBUG).Error(err, "SLOAwareRouter: Error generating predictions, falling back to composite-only scoring")
+		// Fall back to composite-only scoring using prefix cache scores
+		return s.scoreWithoutPredictions(ctx, state, pods, r)
+	}
+	s.updateRequestContextWithPredictions(sloCtx, predictions)
+
+	allPreds := append([]PodPredictionResult(nil), predictions...)
+
 	allPreds, sticky := s.epsilonGreedyAffinityGate(ctx, allPreds, r, "overall", AffinityGateTauGlobal)
 
 	// Check if all pods are invalid and all have running requests
