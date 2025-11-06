@@ -200,6 +200,7 @@ func (s *SLOAwareRouter) Score(ctx context.Context, state *schedulingtypes.Cycle
 	if err != nil {
 		logger.V(logutil.DEBUG).Error(err, "SLOAwareRouter: Error generating predictions, falling back to composite-only scoring")
 		// Fall back to composite-only scoring using prefix cache scores
+		s.setSLOContextForRequest(request, sloCtx)
 		return s.scoreWithoutPredictions(ctx, state, pods, r)
 	}
 	s.updateRequestContextWithPredictions(sloCtx, predictions)
