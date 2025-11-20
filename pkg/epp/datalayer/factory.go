@@ -27,6 +27,10 @@ import (
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 )
 
+const (
+	FeatureGate = "dataLayer"
+)
+
 // PoolInfo represents the DataStore information needed for endpoints.
 // TODO:
 // Consider if to remove/simplify in follow-ups. This is mostly for backward
@@ -78,9 +82,8 @@ func (lc *EndpointLifecycle) NewEndpoint(parent context.Context, inpod *PodInfo,
 		return nil
 	}
 
-	endpoint := NewEndpoint()
-	endpoint.UpdatePod(inpod)
-	collector := NewCollector() // for full backward compatibility, set the logger and poolinfo
+	endpoint := NewEndpoint(inpod, nil)
+	collector := NewCollector() // TODO or full backward compatibility, set the logger and poolinfo
 
 	if _, loaded := lc.collectors.LoadOrStore(key, collector); loaded {
 		// another goroutine already created and stored a collector for this endpoint.
