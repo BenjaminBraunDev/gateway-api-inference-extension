@@ -267,7 +267,10 @@ func (t *PredictedLatency) ResponseComplete(ctx context.Context, request *schedu
 		return
 	}
 	now := time.Now()
-	if !t.config.StreamingMode {
+	// Only process first-token training here for non-streaming mode.
+	// In streaming mode, a request that reaches ResponseComplete with ttft==0
+	// was never streamed — its "TTFT" would be full e2e latency, polluting the model.
+	if predictedLatencyCtx.ttft == 0 && !t.config.StreamingMode {
 		processFirstTokenForLatencyPrediction(ctx, t.latencypredictor, t.config.StreamingMode, t.config.EndpointRoleLabel, predictedLatencyCtx, now, t.config.SamplingMean, t.config.MaxSampledTokens)
 	}
 
@@ -319,9 +322,9 @@ func (t *PredictedLatency) ResponseComplete(ctx context.Context, request *schedu
 	// Also clean up the map entry if the counter reaches zero, preventing stale entries
 	// from accumulating when pods are removed.
 	decodePodKey := targetMetadata.NamespacedName.String()
-	// In streaming mode the prefill pod counter was already decremented at first-token time
-	// (ResponseStreaming). In non-streaming mode, decrement it here at completion.
-	if !t.config.StreamingMode && predictedLatencyCtx.prefillTargetMetadata != nil {
+	// If TTFT was already reported (streaming path, line 240), the prefill pod counter
+	// was already decremented.  Otherwise decrement it here at completion.
+	if predictedLatencyCtx.ttft == 0 && predictedLatencyCtx.prefillTargetMetadata != nil {
 		prefillPodKey := predictedLatencyCtx.prefillTargetMetadata.NamespacedName.String()
 		if t.podCounter(&t.prefillTokensInFlight, prefillPodKey).Add(-int64(predictedLatencyCtx.inputTokenCount)) == 0 {
 			t.prefillTokensInFlight.Delete(prefillPodKey)
