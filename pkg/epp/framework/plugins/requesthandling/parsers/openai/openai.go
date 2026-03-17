@@ -176,9 +176,19 @@ func determineAPITypeFromPath(path string) string {
 
 // extractRequestBody extracts the LLMRequestBody from the given request body map using path-based detection.
 func extractRequestBody(rawBody []byte, headers map[string]string) (*scheduling.LLMRequestBody, error) {
-	// Determine API type from request path
+	// Determine API type from request path, falling back to body-based detection.
 	path := getRequestPath(headers)
 	apiType := determineAPITypeFromPath(path)
+
+	// If path detection fell through to the default, detect from the body instead.
+	if apiType == completionsAPI {
+		var bodyMap map[string]json.RawMessage
+		if err := json.Unmarshal(rawBody, &bodyMap); err == nil {
+			if _, hasMessages := bodyMap["messages"]; hasMessages {
+				apiType = chatCompletionsAPI
+			}
+		}
+	}
 
 	switch apiType {
 	case conversationsAPI:
