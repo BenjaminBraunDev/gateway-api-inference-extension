@@ -42,8 +42,21 @@ type (
 		KVUsageSpec string `json:"kvUsageSpec"`
 		// LoRASpec defines the metric specification string for retrieving LoRA availability.
 		LoRASpec string `json:"loraSpec"`
-		// CacheInfoSpec defines the metrics specification string for retrieving KV cache configuration.
+		// CacheInfoSpec defines the metric specification string for retrieving KV cache configuration
+		// from an info-style gauge where block_size and num_gpu_blocks are label values.
 		CacheInfoSpec string `json:"cacheInfoSpec"`
+		// CacheBlockSizeLabelName overrides the label name used to extract block size from CacheInfoSpec.
+		// Defaults to "block_size" if empty.
+		CacheBlockSizeLabelName string `json:"cacheBlockSizeLabelName,omitempty"`
+		// CacheNumBlocksLabelName overrides the label name used to extract num GPU blocks from CacheInfoSpec.
+		// Defaults to "num_gpu_blocks" if empty.
+		CacheNumBlocksLabelName string `json:"cacheNumBlocksLabelName,omitempty"`
+		// CacheBlockSizeSpec defines the metric specification string for retrieving block size directly
+		// as a gauge value (alternative to CacheInfoSpec labels). Used by engines like Triton TRT-LLM.
+		CacheBlockSizeSpec string `json:"cacheBlockSizeSpec,omitempty"`
+		// CacheNumBlocksSpec defines the metric specification string for retrieving num GPU blocks directly
+		// as a gauge value (alternative to CacheInfoSpec labels). Used by engines like Triton TRT-LLM.
+		CacheNumBlocksSpec string `json:"cacheNumBlocksSpec,omitempty"`
 	}
 
 	// Extractor configuration parameters
@@ -55,12 +68,12 @@ type (
 		// Can be any engine name from EngineConfigs. Defaults to "vllm".
 		DefaultEngine string `json:"defaultEngine"`
 		// EngineConfigs defines metric specifications for specific engine types.
-		// Built-in configs (vLLM, SGLang, trtllm-serve) are automatically appended if not explicitly defined.
+		// Built-in configs (vLLM, SGLang, trtllm-serve, triton-tensorrt-llm) are automatically appended if not explicitly defined.
 		EngineConfigs []engineConfigParams `json:"engineConfigs"`
 	}
 )
 
-// Default engine configurations for vLLM, SGLang, and trtllm-serve.
+// Default engine configurations for vLLM, SGLang, trtllm-serve, and triton-tensorrt-llm.
 var defaultEngineConfigs = []engineConfigParams{
 	{
 		Name:                "vllm",
@@ -71,12 +84,14 @@ var defaultEngineConfigs = []engineConfigParams{
 		CacheInfoSpec:       "vllm:cache_config_info",
 	},
 	{
-		Name:                "sglang",
-		QueuedRequestsSpec:  "sglang:num_queue_reqs",
-		RunningRequestsSpec: "sglang:num_running_reqs",
-		KVUsageSpec:         "sglang:token_usage",
-		LoRASpec:            "",
-		CacheInfoSpec:       "",
+		Name:                    "sglang",
+		QueuedRequestsSpec:      "sglang:num_queue_reqs",
+		RunningRequestsSpec:     "sglang:num_running_reqs",
+		KVUsageSpec:             "sglang:token_usage",
+		LoRASpec:                "",
+		CacheInfoSpec:           "sglang:cache_config_info",
+		CacheBlockSizeLabelName: "page_size",
+		CacheNumBlocksLabelName: "num_pages",
 	},
 	{
 		Name:                "trtllm-serve",
@@ -85,6 +100,16 @@ var defaultEngineConfigs = []engineConfigParams{
 		KVUsageSpec:         "trtllm_kv_cache_utilization",
 		LoRASpec:            "",
 		CacheInfoSpec:       "trtllm_cache_config_info",
+	},
+	{
+		Name:                "triton-tensorrt-llm",
+		QueuedRequestsSpec:  "nv_trt_llm_request_metrics{request_type=waiting}",
+		RunningRequestsSpec: "nv_trt_llm_request_metrics{request_type=scheduled}",
+		KVUsageSpec:         "nv_trt_llm_kv_cache_block_metrics{kv_cache_block_type=fraction}",
+		LoRASpec:            "",
+		CacheInfoSpec:       "",
+		CacheBlockSizeSpec:  "nv_trt_llm_kv_cache_block_metrics{kv_cache_block_type=tokens_per}",
+		CacheNumBlocksSpec:  "nv_trt_llm_kv_cache_block_metrics{kv_cache_block_type=max}",
 	},
 }
 
@@ -112,7 +137,7 @@ func CoreMetricsExtractorFactory(name string, parameters json.RawMessage, handle
 		cfg.EngineLabelKey = DefaultEngineTypeLabelKey
 	}
 
-	// Append default engine configs (vllm, sglang) if not explicitly defined by user
+	// Append default engine configs if not explicitly defined by user
 	userDefinedEngines := make(map[string]bool)
 	for _, ec := range cfg.EngineConfigs {
 		userDefinedEngines[ec.Name] = true
@@ -135,13 +160,17 @@ func CoreMetricsExtractorFactory(name string, parameters json.RawMessage, handle
 			return nil, fmt.Errorf("engine config name cannot be %q (reserved)", DefaultEngineType)
 		}
 
-		mapping, err := NewMapping(
-			engineConfig.QueuedRequestsSpec,
-			engineConfig.RunningRequestsSpec,
-			engineConfig.KVUsageSpec,
-			engineConfig.LoRASpec,
-			engineConfig.CacheInfoSpec,
-		)
+		mapping, err := NewMappingFromConfig(MappingConfig{
+			Queue:               engineConfig.QueuedRequestsSpec,
+			Running:             engineConfig.RunningRequestsSpec,
+			KVUsage:             engineConfig.KVUsageSpec,
+			Lora:                engineConfig.LoRASpec,
+			CacheInfo:           engineConfig.CacheInfoSpec,
+			CacheBlockSizeLabel: engineConfig.CacheBlockSizeLabelName,
+			CacheNumBlocksLabel: engineConfig.CacheNumBlocksLabelName,
+			CacheBlockSize:      engineConfig.CacheBlockSizeSpec,
+			CacheNumBlocks:      engineConfig.CacheNumBlocksSpec,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create mapping for engine %q: %w", engineConfig.Name, err)
 		}

@@ -18,6 +18,14 @@ data:
         path: {{ .Values.inferenceExtension.metricsDataSource.path | default "/metrics" | quote }}
         insecureSkipVerify: {{ .Values.inferenceExtension.metricsDataSource.insecureSkipVerify | default true }}
     - type: core-metrics-extractor
+      {{- $modelServerType := .Values.inferencePool.modelServerType | default "vllm" }}
+      {{- if and .Values.inferenceExtension.endpointsServer (not .Values.inferenceExtension.endpointsServer.createInferencePool) }}
+        {{- $modelServerType = .Values.inferenceExtension.endpointsServer.modelServerType | default "vllm" }}
+      {{- end }}
+      {{- if ne $modelServerType "vllm" }}
+      parameters:
+        defaultEngine: {{ $modelServerType | quote }}
+      {{- end }}
     {{- if .Values.inferenceExtension.latencyPredictor.enabled }}
     - type: predicted-latency-scorer
       parameters:
@@ -47,6 +55,12 @@ data:
       - pluginRef: predicted-latency-scorer
     featureGates:
       - prepareDataPlugins
+      - dataLayer
+    data:
+      sources:
+      - pluginRef: metrics-data-source
+        extractors:
+        - pluginRef: core-metrics-extractor
     {{- else }}
     - name: default
       plugins:
