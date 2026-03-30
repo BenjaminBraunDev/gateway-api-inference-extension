@@ -103,14 +103,14 @@ func NewMappingFromConfig(cfg MappingConfig) (*Mapping, error) {
 		return nil, errors.Join(errs...)
 	}
 	return &Mapping{
-		TotalQueuedRequests: queueSpec,
+		TotalQueuedRequests:  queueSpec,
 		TotalRunningRequests: runningSpec,
-		KVCacheUtilization:  kvusageSpec,
-		LoraRequestInfo:     loraSpec,
-		CacheInfo:           cacheInfoSpec,
-		CacheBlockSizeLabel: cfg.CacheBlockSizeLabel,
-		CacheNumBlocksLabel: cfg.CacheNumBlocksLabel,
-		CacheBlockSize:      cacheBlockSizeSpec,
-		CacheNumBlocks:      cacheNumBlocksSpec,
+		KVCacheUtilization:   kvusageSpec,
+		LoraRequestInfo:      loraSpec,
+		CacheInfo:            cacheInfoSpec,
+		CacheBlockSizeLabel:  cfg.CacheBlockSizeLabel,
+		CacheNumBlocksLabel:  cfg.CacheNumBlocksLabel,
+		CacheBlockSize:       cacheBlockSizeSpec,
+		CacheNumBlocks:       cacheNumBlocksSpec,
 	}, nil
 }
