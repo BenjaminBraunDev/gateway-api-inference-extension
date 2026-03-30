@@ -123,7 +123,7 @@ $ helm install triton-llama3-8b-instruct \
 
 ### Install for trtllm-serve (TensorRT-LLM)
 
-Use `--set inferencePool.modelServerType=trtllm-serve` to install for TensorRT-LLM's built-in OpenAI-compatible server, e.g.,
+Use `--set inferencePool.modelServerType=trtllm-serve` to install for TensorRT-LLM's built-in OpenAI-compatible server ([`trtllm-serve`](https://nvidia.github.io/TensorRT-LLM/commands/trtllm-serve.html)). Prometheus metrics are supported in TensorRT-LLM >= 1.3.0 ([metrics reference](https://nvidia.github.io/TensorRT-LLM/latest/examples/prometheus_metrics.html)), but the version used must expose the metrics defined in the [Model Server Protocol](https://gateway-api-inference-extension.sigs.k8s.io/concepts/model-server-protocol/). Example:
 
 ```txt
 $ helm install trtllm-serve-llama3-8b-instruct \
