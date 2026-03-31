@@ -103,6 +103,8 @@ var defaultEngineConfigs = []engineConfigParams{
 		KVUsageSpec:         "trtllm_kv_cache_utilization",
 		LoRASpec:            "",
 		CacheInfoSpec:       "",
+		CacheBlockSizeSpec:  "trtllm_kv_cache_tokens_per_block",
+		CacheNumBlocksSpec:  "trtllm_kv_cache_max_blocks",
 	},
 	{
 		Name:                "triton-tensorrt-llm",
