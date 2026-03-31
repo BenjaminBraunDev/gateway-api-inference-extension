@@ -87,7 +87,7 @@ var defaultEngineConfigs = []engineConfigParams{
 		RunningRequestsSpec: "trtllm_num_requests_running",
 		KVUsageSpec:         "trtllm_kv_cache_utilization",
 		LoRASpec:            "",
-		CacheInfoSpec:       "trtllm_cache_config_info",
+		CacheInfoSpec:       "",
 	},
 }
 
