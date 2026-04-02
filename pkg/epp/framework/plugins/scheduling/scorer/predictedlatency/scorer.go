@@ -96,10 +96,10 @@ var DefaultConfig = Config{
 	EpsilonExploreNeg:         0.01,
 	AffinityGateTau:           0.80,
 	AffinityGateTauGlobal:     0.99,
-	AffinityMaxTTFTPenaltyMs:  5000.0,
+	AffinityMaxTTFTPenaltyMs:  10000.0,
 	ContextTTL:                5 * time.Minute,
 	SelectionMode:             "linear",
-	StreamingMode:             true,
+	StreamingMode:             false,
 }
 
 func PredictedLatencyFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
