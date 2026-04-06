@@ -75,12 +75,6 @@ data:
       - pluginRef: weighted-random-picker
     featureGates:
       - prepareDataPlugins
-      - dataLayer
-    data:
-      sources:
-      - pluginRef: metrics-data-source
-        extractors:
-        - pluginRef: core-metrics-extractor
     {{- else }}
     - name: default
       plugins:

@@ -179,7 +179,7 @@ func (ext *Extractor) Extract(ctx context.Context, data any, ep fwkdl.Endpoint) 
 		if metric, err := spec.getLatestMetric(families); err != nil {
 			errs = append(errs, err)
 		} else {
-			clone.CacheNumGPUBlocks = int(extractValue(metric))
+			clone.CacheNumBlocks = int(extractValue(metric))
 			updated = true
 		}
 	}
@@ -253,7 +253,7 @@ func populateCacheInfoMetrics(clone *fwkdl.Metrics, metric *dto.Metric, blockSiz
 		case numBlocksLabelName:
 			if label.GetValue() != "" {
 				if val, err := strconv.Atoi(label.GetValue()); err == nil {
-					clone.CacheNumGPUBlocks = val
+					clone.CacheNumBlocks = val
 				} else {
 					*errs = append(*errs, err)
 				}

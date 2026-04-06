@@ -355,8 +355,8 @@ func TestCacheInfoLabelAliasing(t *testing.T) {
 	if ep.GetMetrics().CacheBlockSize != 64 {
 		t.Errorf("expected CacheBlockSize 64, got %d", ep.GetMetrics().CacheBlockSize)
 	}
-	if ep.GetMetrics().CacheNumGPUBlocks != 11147 {
-		t.Errorf("expected CacheNumGPUBlocks 11147, got %d", ep.GetMetrics().CacheNumGPUBlocks)
+	if ep.GetMetrics().CacheNumBlocks != 11147 {
+		t.Errorf("expected CacheNumBlocks 11147, got %d", ep.GetMetrics().CacheNumBlocks)
 	}
 }
 
@@ -422,8 +422,8 @@ func TestDirectGaugeSpecExtraction(t *testing.T) {
 	if ep.GetMetrics().CacheBlockSize != 64 {
 		t.Errorf("expected CacheBlockSize 64, got %d", ep.GetMetrics().CacheBlockSize)
 	}
-	if ep.GetMetrics().CacheNumGPUBlocks != 6239 {
-		t.Errorf("expected CacheNumGPUBlocks 6239, got %d", ep.GetMetrics().CacheNumGPUBlocks)
+	if ep.GetMetrics().CacheNumBlocks != 6239 {
+		t.Errorf("expected CacheNumBlocks 6239, got %d", ep.GetMetrics().CacheNumBlocks)
 	}
 	if ep.GetMetrics().KVCacheUsagePercent != 0.42 {
 		t.Errorf("expected KVCacheUsagePercent 0.42, got %f", ep.GetMetrics().KVCacheUsagePercent)
