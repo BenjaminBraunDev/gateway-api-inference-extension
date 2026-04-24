@@ -36,7 +36,9 @@ The plugin config supports:
 - `autoTune` (default true)
   - If true, block size and per-pod capacity can be inferred from endpoint metrics.
 - `blockSizeTokens`
-  - Prefix block size in tokens.
+  - Prefix block size in tokens. Should reflect the underlying model server's cache chunk size (vLLM default: 16).
+  - Minimum recommended value: **16**. Lower values cause the per-pod LRU indexer to consume excessive memory (~60–70 bytes per entry × `lruCapacityPerServer` × number of pods) and can OOM the EPP under load.
+  - When `autoTune` is enabled, the effective block size is clamped to a floor of 16 even if the model server reports a smaller value. Manually configured values below 16 are honored but trigger a startup warning.
 - `maxPrefixBlocksToMatch`
   - Caps how much of a long prompt is considered.
 - `lruCapacityPerServer`

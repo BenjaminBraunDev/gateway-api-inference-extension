@@ -484,6 +484,64 @@ func TestPrefixPluginAutoTune(t *testing.T) {
 	assert.Contains(t, p.indexer().Pods(), ServerID(endpoint.GetMetadata().NamespacedName))
 }
 
+func TestAutoTuneBlockSizeFloor(t *testing.T) {
+	makeEndpoint := func(name string, metrics *fwkdl.Metrics) fwksched.Endpoint {
+		return fwksched.NewEndpoint(
+			&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: name}},
+			metrics, fwkdl.NewAttributes(),
+		)
+	}
+
+	t.Run("metric below minimum is clamped to floor", func(t *testing.T) {
+		cfg := config{
+			AutoTune:        true,
+			BlockSizeTokens: defaultBlockSizeTokens,
+		}
+		p, err := newPrepareData(context.Background(), cfg, nil)
+		assert.NoError(t, err)
+
+		ep := makeEndpoint("pod1", &fwkdl.Metrics{CacheBlockSize: 1})
+		assert.Equal(t, minBlockSizeTokens, p.GetBlockSize([]fwksched.Endpoint{ep}))
+	})
+
+	t.Run("metric above minimum is honored", func(t *testing.T) {
+		cfg := config{
+			AutoTune:        true,
+			BlockSizeTokens: defaultBlockSizeTokens,
+		}
+		p, err := newPrepareData(context.Background(), cfg, nil)
+		assert.NoError(t, err)
+
+		ep := makeEndpoint("pod1", &fwkdl.Metrics{CacheBlockSize: 32})
+		assert.Equal(t, 32, p.GetBlockSize([]fwksched.Endpoint{ep}))
+	})
+
+	t.Run("fallback below minimum is clamped when metric is unavailable", func(t *testing.T) {
+		cfg := config{
+			AutoTune:        true,
+			BlockSizeTokens: 4,
+		}
+		p, err := newPrepareData(context.Background(), cfg, nil)
+		assert.NoError(t, err)
+
+		// Endpoint with no CacheBlockSize metric: falls back to config, then floored.
+		ep := makeEndpoint("pod1", &fwkdl.Metrics{})
+		assert.Equal(t, minBlockSizeTokens, p.GetBlockSize([]fwksched.Endpoint{ep}))
+	})
+
+	t.Run("manual mode is not clamped", func(t *testing.T) {
+		cfg := config{
+			AutoTune:        false,
+			BlockSizeTokens: 4,
+		}
+		p, err := newPrepareData(context.Background(), cfg, nil)
+		assert.NoError(t, err)
+
+		ep := makeEndpoint("pod1", &fwkdl.Metrics{CacheBlockSize: 1})
+		assert.Equal(t, 4, p.GetBlockSize([]fwksched.Endpoint{ep}))
+	})
+}
+
 func TestMaxPrefixTokensToMatch(t *testing.T) {
 	// BlockSizeTokens=1 means each block is 4 chars (1 token * 4 chars/token).
 	// With MaxPrefixTokensToMatch=2, maxBlocks = 2/1 = 2, so only the first

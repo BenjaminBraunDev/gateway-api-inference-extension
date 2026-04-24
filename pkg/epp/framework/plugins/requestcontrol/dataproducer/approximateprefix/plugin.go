@@ -81,6 +81,15 @@ func newPrepareData(ctx context.Context, config config, handle plugin.Handle) (*
 	if config.MaxPrefixTokensToMatch < 0 {
 		return nil, fmt.Errorf("invalid configuration: MaxPrefixTokensToMatch must be >= 0 (current value: %d)", config.MaxPrefixTokensToMatch)
 	}
+	if config.BlockSizeTokens > 0 && config.BlockSizeTokens < minBlockSizeTokens {
+		log.FromContext(ctx).Info(
+			"WARNING: prefix-cache-scorer BlockSizeTokens is below the recommended minimum; "+
+				"this can cause excessive EPP memory usage and OOMs under load. "+
+				"Consider matching the model server's cache block size (vLLM default is 16).",
+			"blockSizeTokens", config.BlockSizeTokens,
+			"recommendedMinimum", minBlockSizeTokens,
+		)
+	}
 	indexer := newIndexer(ctx, config.LRUCapacityPerServer)
 
 	p := &prepareData{
@@ -235,18 +244,23 @@ func (p *prepareData) matchLongestPrefix(ctx context.Context, hashes []blockHash
 }
 
 // GetBlockSize returns the block size in tokens, potentially auto-tuned from endpoint metrics.
+// When AutoTune is enabled, the returned value is clamped to minBlockSizeTokens to prevent
+// the indexer from blowing up memory on misreported or misconfigured small values.
 func (p *prepareData) GetBlockSize(endpoints []framework.Endpoint) int {
 	if !p.config.AutoTune || len(endpoints) == 0 {
 		return p.config.BlockSizeTokens
 	}
 
+	blockSize := p.config.BlockSizeTokens
 	if endpoint := endpoints[0]; endpoint.GetMetrics() != nil {
-		cacheBlockSize := endpoint.GetMetrics().CacheBlockSize
-		if cacheBlockSize > 0 {
-			return cacheBlockSize
+		if cacheBlockSize := endpoint.GetMetrics().CacheBlockSize; cacheBlockSize > 0 {
+			blockSize = cacheBlockSize
 		}
 	}
-	return p.config.BlockSizeTokens
+	if blockSize < minBlockSizeTokens {
+		return minBlockSizeTokens
+	}
+	return blockSize
 }
 
 // ApproxPrefixCacheFactory is the factory function for the prefix cache prepare data plugin.

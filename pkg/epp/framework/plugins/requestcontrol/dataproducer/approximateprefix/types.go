@@ -87,8 +87,14 @@ const (
 	// podActiveCheckInterval is the interval at which we check if pods are still active.
 	podActiveCheckInterval = 2 * time.Minute
 
-	// defaultBlockSizeTokens is the default token block size (vLLM default is 16).
-	defaultBlockSizeTokens = 16
+	// minBlockSizeTokens is the minimum block size in tokens. Values below this lead to
+	// excessive memory consumption in the LRU indexer (~60-70 bytes per entry per pod) and
+	// can OOM the EPP under load. The autotune path enforces this floor; manually configured
+	// values below this threshold trigger a startup warning but are still honored.
+	minBlockSizeTokens = 16
+
+	// defaultBlockSizeTokens is the default token block size (matches vLLM's default).
+	defaultBlockSizeTokens = minBlockSizeTokens
 
 	// defaultMaxPrefixBlocks is the maximum number of blocks to match.
 	// Two long requests with the same prefix up to this limit will be indistinguishable.
